@@ -7,7 +7,10 @@
 
 - 사용자 토큰: DEV_USER_TOKENS의 첫 토큰 (기본 dev-token-U001)
 - ADMIN_ACCESS_TOKEN이 있으면 각 주문의 O-04 기록(호출 순서)도 보여 준다.
-- 결제 관련 태그(#결제거절 등)는 같은 프로세스의 가짜 E일 때만 동작한다 (E_PAYMENT_URL 비움).
+- 별도 e-payment와 함께 전부 실행하려면 백엔드 O_DEMO_E_OVERRIDE=1,
+  e-payment E_ALLOW_MOCK_OVERRIDE=1로 각각 재시작한다. 이때 O가 결제 태그를
+  E-01의 X-Mock-Outcome 헤더로 전달한다 (시연 전용).
+- 별도 scripts/fake_e_server.py는 요청별 헤더를 지원하지 않는다.
 """
 
 import os

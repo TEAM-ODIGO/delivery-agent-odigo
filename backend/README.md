@@ -48,11 +48,13 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 ```
 
 - 실패 상황은 주문 문장의 태그로 고른다: `#품절` `#모두품절` `#혜택불일치` `#결제거절` `#결제미확정` `#응답유실` `#B08장애` `#A장애` (`app/fakes/scenario.py`)
+- 별도 `e-payment`를 쓰면서 `#결제거절`·`#결제미확정`을 주문별로 시연하려면 백엔드 `.env`에 `O_DEMO_E_OVERRIDE=1`, E의 `.env`에 `E_ALLOW_MOCK_OVERRIDE=1`을 설정하고 두 서버를 재시작한다. 이 설정은 시연·테스트 전용이며 일반 요청에는 `X-Mock-Outcome` 헤더를 보내지 않는다.
+- `#응답유실`은 시연 모드에서 O가 E의 응답만 유실된 것으로 처리한다. E의 결제 기록은 남고 O는 E-03으로 상태를 확인한다.
 - `.env`에 `ADMIN_ACCESS_TOKEN`을 넣으면 주문마다 O-04 호출 순서도 보여 준다.
 - E를 별도 서버로 띄워 D-06을 HTTP로 확인하려면:
   ```bash
   uv run --env-file .env uvicorn scripts.fake_e_server:app --port 8002   # 가짜 E (D_URL 기본 localhost:8000)
-  # .env에 E_PAYMENT_URL=http://localhost:8002 넣고 모놀리스 재시작. 결과는 FAKE_E_MODE=APPROVE|DECLINE|UNKNOWN
+  # .env에 E_PAYMENT_URL=http://localhost:8002 넣고 모놀리스 재시작. 이 서버는 FAKE_E_MODE=APPROVE|DECLINE|UNKNOWN만 지원한다.
   ```
 
 ## C(혜택)와 함께 확인
