@@ -9,7 +9,8 @@ from app.modules.delegation.benefits import BenefitUnavailable, CBenefitPort
 from app.modules.delegation.constants import PaymentMethodType
 from app.modules.delegation.schemas import Quote
 
-SPEC = json.loads((Path(__file__).parent / "spec_examples.json").read_text())["apis"]
+SPEC_PATH = Path(__file__).parent / "spec_examples.json"
+SPEC = json.loads(SPEC_PATH.read_text(encoding="utf-8"))["apis"]  # 윈도우 기본 인코딩(cp949) 대신 UTF-8
 C05 = SPEC["C-05"]["response"]
 C02 = SPEC["C-02"]["response"]
 QUOTE = Quote.model_validate(SPEC["D-02"]["request"]["quote"])
