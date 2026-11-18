@@ -3,7 +3,7 @@
 import os
 from dataclasses import dataclass, field
 
-from e_payment.nfc import parse_cards
+from e_payment.nfc import parse_cards, parse_tokens
 
 
 def _env(name: str, default: str = "") -> str:
@@ -38,8 +38,10 @@ class Settings:
     reconcile_seconds: float = field(
         default_factory=lambda: float(_env("E_RECONCILE_SECONDS", "0"))
     )
-    # NFC 실물 카드(로컬 확장): 가상카드ID=카드 일련번호(UID)를 쉼표로 나열. 비우면 NFC 확인 안 함
-    #   예) CARD001=04:2C:98:1A:32:24:91,CARD002=04:AA:BB:CC:DD:EE:FF
+    # NFC 실물 카드(로컬 확장). 둘 다 비우면 NFC 확인 안 함 (자세한 규칙은 nfc.py)
+    #   E_NFC_TOKENS: 가상카드ID=카드 URL의 t 값  (아이폰·안드로이드)   예) CARD001=odigo-card-001-xxxx
+    #   E_NFC_CARDS : 가상카드ID=카드 일련번호(UID) (안드로이드만)      예) CARD001=04:2C:98:1A:32:24:91
+    nfc_tokens: dict[str, str] = field(default_factory=lambda: parse_tokens(_env("E_NFC_TOKENS")))
     nfc_cards: dict[str, str] = field(default_factory=lambda: parse_cards(_env("E_NFC_CARDS")))
 
 

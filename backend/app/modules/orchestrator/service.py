@@ -177,7 +177,8 @@ class OrchestratorService:
             RunEventType.USER_REPLY,
             run.state,
             run.state,
-            detail={k: v for k, v in payload.items() if k != "expected_state_version"},
+            # card_tap(NFC 토큰)은 기록에 남기지 않는다
+            detail={k: v for k, v in payload.items() if k not in ("expected_state_version", "card_tap")},
         )
         handler = {
             ReplyType.CLARIFICATION: self._on_clarification,

@@ -153,6 +153,12 @@ export interface RunView {
   } | null;
 }
 
+// NFC 실물 카드 태그 결과 (로컬 확장). token: 카드 URL의 t 값, serial_number: 카드 일련번호(안드로이드만)
+export interface CardTap {
+  token?: string;
+  serial_number?: string;
+}
+
 export type Reply =
   | { type: "CLARIFICATION"; answers: { slot: string; value: number | string }[] }
   | {
@@ -165,7 +171,7 @@ export type Reply =
       payment_method_id: string;
       local_currency_amount_krw?: number; // 있으면 payment_method_id는 나머지를 낼 카드
     }
-  | { type: "APPROVE"; card_tap?: { serial_number: string } } // card_tap: NFC 실물 카드 태그(로컬 확장)
+  | { type: "APPROVE"; card_tap?: CardTap } // card_tap: NFC 실물 카드 태그(로컬 확장)
   | { type: "CANCEL" };
 
 export interface PaymentMethod {

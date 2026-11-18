@@ -100,13 +100,14 @@ def create_app(
             raise AppError(400, "VALIDATION_ERROR", "Idempotency-Key는 execution_id와 같아야 합니다.",
                            {"fields": [{"loc": "header.Idempotency-Key", "reason": "mismatch"}]})
         return service.request_payment(
-            db, body.model_dump(), _rid(request, body.request_id), d, _mode(x_mock_outcome), cfg.nfc_cards
+            db, body.model_dump(), _rid(request, body.request_id), d, _mode(x_mock_outcome),
+            cfg.nfc_cards, cfg.nfc_tokens,
         )
 
     # ---------------- NFC 카드 태그 확인 (로컬 확장, 팀 합의 전) ----------------
     @app.post("/internal/card-taps/verify", dependencies=[Auth], summary="NFC 실물 카드 태그 확인 (O → E)")
     def verify_card_tap(body: schemas.CardTapCheck):
-        reason = nfc.check(cfg.nfc_cards, body.payment_method_id, body.card_tap.model_dump())
+        reason = nfc.check(cfg.nfc_cards, cfg.nfc_tokens, body.payment_method_id, body.card_tap.model_dump())
         return {
             "payment_method_id": body.payment_method_id,
             "matched": reason is None,

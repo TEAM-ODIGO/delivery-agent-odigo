@@ -12,9 +12,17 @@ class _Strict(BaseModel):
 
 
 class CardTap(_Strict):
-    """휴대폰이 읽은 NFC 카드 정보 (로컬 확장, 팀 합의 전). 지금은 카드 일련번호(UID)만 쓴다."""
+    """휴대폰이 읽은 NFC 카드 정보 (로컬 확장, 팀 합의 전). 둘 중 하나는 있어야 한다.
+    token: 카드 URL의 t 값 (아이폰·안드로이드), serial_number: 카드 일련번호 (안드로이드만)"""
 
-    serial_number: Annotated[str, Field(min_length=1, max_length=40)]
+    serial_number: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    token: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if self.serial_number is None and self.token is None:
+            raise ValueError("serial_number나 token 중 하나는 있어야 합니다.")
+        return self
 
 
 class PaymentRequest(_Strict):

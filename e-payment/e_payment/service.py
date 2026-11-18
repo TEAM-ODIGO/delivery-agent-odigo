@@ -124,7 +124,13 @@ def _by_execution(db: Session, execution_id: str) -> Payment | None:
 
 
 def request_payment(
-    db: Session, body: dict, request_id: str, d: DClient, mode: str, nfc_cards: dict[str, str] | None = None
+    db: Session,
+    body: dict,
+    request_id: str,
+    d: DClient,
+    mode: str,
+    nfc_cards: dict[str, str] | None = None,
+    nfc_tokens: dict[str, str] | None = None,
 ) -> dict:
     exe = body["execution_id"]
     split = {k: body[k] for k in SPLIT_FIELDS if body.get(k) is not None}
@@ -163,11 +169,18 @@ def request_payment(
         db.rollback()
         return _replay(_by_execution(db, exe), fp)
 
-    _settle(db, p, mode, body.get("card_tap"), nfc_cards or {})  # ④ 모의 기관 승인 → ⑤ 원장 기록
+    _settle(db, p, mode, body.get("card_tap"), nfc_cards or {}, nfc_tokens or {})  # ④ 모의 기관 승인 → ⑤ 원장 기록
     return payment_out(p)
 
 
-def _settle(db: Session, p: Payment, mode: str, card_tap: dict | None = None, nfc_cards: dict | None = None) -> None:
+def _settle(
+    db: Session,
+    p: Payment,
+    mode: str,
+    card_tap: dict | None = None,
+    nfc_cards: dict | None = None,
+    nfc_tokens: dict | None = None,
+) -> None:
     legs = _legs(p)
     methods = {mid: _method(db, mid, lock=True) for mid, _ in legs}
     reason = None
@@ -182,7 +195,7 @@ def _settle(db: Session, p: Payment, mode: str, card_tap: dict | None = None, nf
         if reason:
             break
     if not reason:  # NFC 실물 카드(로컬 확장): 카드 몫(payment_method_id)을 낼 카드를 태그했는지
-        reason = nfc.check(nfc_cards or {}, p.payment_method_id, card_tap)
+        reason = nfc.check(nfc_cards or {}, nfc_tokens or {}, p.payment_method_id, card_tap)
     if reason:
         p.status, p.reason_codes = "FAILED", [reason]
     else:
