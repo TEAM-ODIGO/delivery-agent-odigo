@@ -206,3 +206,10 @@ def orchestrator_service(session: Session, d_session: Session) -> OrchestratorSe
         delegation=delegation_service(d_session),
         retry_delay=settings.orchestrator_retry_delay,
     )
+
+
+def cart_service(session: Session):
+    """요기요 장바구니 담기 (YOGIYO_CART_MODE: fake 기본 | real | off)."""
+    from app.modules.cart.service import CartService
+
+    return CartService(session, SessionLocal)

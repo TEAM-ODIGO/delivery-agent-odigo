@@ -12,6 +12,11 @@ dependencies = [
     "psycopg[binary]>=3,<4",
 ]
 
+[project.optional-dependencies]
+yogiyo = [
+    "playwright>=1.65.2",
+]
+
 [dependency-groups]
 dev = ["pytest", "ruff"]
 

@@ -204,3 +204,36 @@ export interface AuditLog {
   details: Record<string, unknown>;
   created_at: string;
 }
+
+// O-13 / O-14 요기요 장바구니 담기
+export type YogiyoCartStatus =
+  | "NONE"
+  | "QUEUED"
+  | "RUNNING"
+  | "CART_READY"
+  | "CART_MISMATCH"
+  | "FAILED";
+
+export interface YogiyoCartItem {
+  menu_id: number | string;
+  name: string | null;
+  quantity: number;
+  unit_price_krw: number | null;
+  options?: (string | null)[];
+}
+
+export interface YogiyoCartJob {
+  status: YogiyoCartStatus;
+  job_id?: string;
+  mode?: "fake" | "real" | string;
+  restaurant_id?: string;
+  cart_items?: YogiyoCartItem[];
+  menu_subtotal_krw?: number | null;
+  delivery_fee_krw?: number | null;
+  mismatches?: string[];
+  error?: string | null;
+  yogiyo_url?: string | null;
+  screenshot?: string | null; // data URL (끝난 작업만)
+  created_at?: string;
+  finished_at?: string | null;
+}

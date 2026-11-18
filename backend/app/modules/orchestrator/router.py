@@ -18,9 +18,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import SessionLocal, get_session
 from app.core.errors import AppError
+from app.modules.cart.service import CartService, release_browser
 from app.modules.orchestrator.schemas import Reply, RunCreate
 from app.modules.orchestrator.service import OrchestratorService
-from app.modules.orchestrator.wiring import orchestrator_service
+from app.modules.orchestrator.wiring import cart_service, orchestrator_service
 
 router = APIRouter(prefix="/orchestrator", tags=["O · orchestrator"])
 
@@ -77,13 +78,29 @@ IdemKey = Annotated[str | None, Depends(idempotency_key)]
 
 @router.post("/runs", status_code=201, summary="O-01 주문 요청 시작")
 def start_run(body: RunCreate, svc: Service, user_id: UserId, key: IdemKey):
+    release_browser()  # 이전 주문 때 열어 둔 요기요 창을 닫는다 (창을 띄워 시연할 때만)
     return svc.start_run(user_id, body, key)
+
+
+def get_cart(session: Annotated[Session, Depends(get_session)]) -> CartService:
+    return cart_service(session)
+
+
+Cart = Annotated[CartService, Depends(get_cart)]
 
 
 @router.post("/runs/{request_id}/reply", summary="O-02 사용자 응답 전달")
 def reply(
-    request_id: str, svc: Service, user_id: UserId, key: IdemKey, body: Annotated[Reply, Body()]
+    request_id: str,
+    svc: Service,
+    user_id: UserId,
+    key: IdemKey,
+    body: Annotated[Reply, Body()],
+    cart: Cart,
 ):
+    if body.type == "APPROVE":
+        svc.check_owner(user_id, request_id)
+        cart.check_approvable(request_id)  # 요기요 장바구니 담기에 실패했으면 결제하지 않는다
     return svc.reply(user_id, request_id, body, key)
 
 
@@ -113,6 +130,21 @@ def admin_runs(svc: Service, limit: int = 100, state: str | None = None):
 )
 def admin_audit_logs(request_id: str, svc: Service):
     return svc.list_audit_logs(request_id)
+
+
+@router.post(
+    "/runs/{request_id}/yogiyo-cart",
+    status_code=202,
+    summary="O-13 요기요 장바구니 담기 시작 (결제 직전에서 멈춤)",
+)
+def start_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
+    return cart.start(**svc.cart_target(user_id, request_id))
+
+
+@router.get("/runs/{request_id}/yogiyo-cart", summary="O-14 요기요 장바구니 담기 결과")
+def get_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
+    svc.check_owner(user_id, request_id)
+    return cart.latest(request_id) or {"status": "NONE"}
 
 
 @router.get("/runs/{request_id}", summary="O-03 진행 상태 조회")

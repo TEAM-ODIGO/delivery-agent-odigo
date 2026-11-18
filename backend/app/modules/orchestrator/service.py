@@ -264,6 +264,36 @@ class OrchestratorService:
             row["reason_codes"] = reasons or ([run.error["code"]] if run.error else [])
         return row
 
+    # ---- 요기요 장바구니 (O-13·O-14). 담기 자체는 cart 모듈이 한다 ----
+    CART_STATES = (
+        RunState.AWAITING_APPROVAL,
+        RunState.PAYING,
+        RunState.PAYMENT_UNKNOWN,
+        RunState.COMPLETED,
+    )
+
+    def cart_target(self, user_id: str, request_id: str) -> dict:
+        """O-13: 요기요에 담을 대상 = 사용자가 승인하려는(승인한) B-06 견적. 그 전 단계면 409."""
+        run = self._load(request_id, user_id)
+        quote = (run.context or {}).get("target_quote")
+        if run.state not in self.CART_STATES or not quote:
+            raise AppError(
+                409,
+                "CART_NOT_AVAILABLE",
+                "승인 단계부터 요기요 장바구니에 담을 수 있어요.",
+                {"state": run.state},
+            )
+        return {
+            "request_id": run.request_id,
+            "user_id": run.user_id,
+            "quote": quote,
+            "message": run.message,
+        }
+
+    def check_owner(self, user_id: str, request_id: str) -> None:
+        """O-14: 본인 주문인지만 확인 (남의 주문은 404)."""
+        self._load(request_id, user_id)
+
     def list_payment_methods(self, user_id: str) -> dict:
         """O-10: 맡길 결제수단 목록 (C-02)."""
         res = self.c.list_methods(user_id)

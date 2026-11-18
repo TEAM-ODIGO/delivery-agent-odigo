@@ -3,6 +3,8 @@ import type { StepProps } from "../pages/RunPage";
 import { Banner, Button, Row, Screen, Tag } from "../components/ui";
 import { clock, krw, secondsLeft, unverifiedTexts } from "../lib/format";
 import { useNow } from "../lib/hooks";
+import YogiyoCart, { cartBlockReason, useYogiyoCart } from "../components/YogiyoCart";
+import { useIsMutating } from "@tanstack/react-query";
 
 export default function Approval({ view, busy, send, cancel }: StepProps) {
   const now = useNow();
@@ -12,6 +14,9 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
   const left = secondsLeft(expires_at, now);
   const expired = left === 0;
   const unverified = unverifiedTexts(unverified_conditions);
+  const cart = useYogiyoCart(view.request_id);
+  const starting = useIsMutating({ mutationKey: ["yogiyo-cart-start", view.request_id] }) > 0;
+  const cartBlock = cartBlockReason(cart.data, starting);
 
   return (
     <Screen
@@ -22,7 +27,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
           <Button kind="secondary" onClick={cancel} disabled={busy}>
             취소
           </Button>
-          <Button onClick={() => send({ type: "APPROVE" })} disabled={busy || expired}>
+          <Button onClick={() => send({ type: "APPROVE" })} disabled={busy || expired || !!cartBlock}>
             {busy ? "결제 요청 중…" : "승인하고 결제"}
           </Button>
         </>
@@ -85,6 +90,8 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
           {expired ? "승인 유효시간이 지났어요. 취소 후 다시 주문해 주세요." : `승인은 ${clock(expires_at)}까지 유효해요`}
         </Banner>
       )}
+      <YogiyoCart requestId={view.request_id} />
+      {cartBlock && <Banner tone="bad">{cartBlock}</Banner>}
       <p className="faint">승인하면 바로 결제가 시작되고, 그 뒤에는 취소할 수 없어요.</p>
     </Screen>
   );
