@@ -1,0 +1,13 @@
+[project]
+name = "e-payment"
+version = "0.1.0"
+description = "E 모의결제 서버 (FastAPI)"
+requires-python = ">=3.14,<3.15"
+dependencies = ["fastapi", "pydantic>=2,<3", "sqlalchemy>=2,<3", "uvicorn", "httpx", "psycopg[binary]>=3,<4"]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

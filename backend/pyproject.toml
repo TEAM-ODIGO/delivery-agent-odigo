@@ -1,0 +1,27 @@
+[project]
+name = "delivery-agent"
+version = "0.1.0"
+description = "자연어 배달 주문 AI Agent - 모듈형 모놀리스 (O, A, B, C, D)"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "fastapi",
+    "pydantic>=2,<3",
+    "sqlalchemy>=2,<3",
+    "uvicorn",
+    "httpx",
+    "psycopg[binary]>=3,<4",
+]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
