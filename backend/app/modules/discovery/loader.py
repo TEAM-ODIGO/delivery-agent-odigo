@@ -9,15 +9,19 @@
 
 import csv
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import unquote
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.modules.discovery.catalog_models import Menu, Restaurant
 from app.modules.discovery.timeutil import now_kst
+
+log = logging.getLogger("app")
 
 DATA_DIR = Path(os.getenv("CATALOG_DATA_DIR", Path(__file__).resolve().parents[3] / "data"))
 RESTAURANT_CSV = "1_식당.csv"
@@ -142,10 +146,24 @@ def load_if_empty(session: Session) -> tuple[int, int] | None:
     """restaurant 테이블이 비어 있고 CSV가 있으면 적재한다. 이미 있으면 아무것도 하지 않는다."""
     if session.scalar(select(func.count()).select_from(Restaurant)):
         return None
-    r, m = DATA_DIR / RESTAURANT_CSV, DATA_DIR / MENU_CSV
-    if not (r.exists() and m.exists()):
+    r, m = _find_csv(RESTAURANT_CSV), _find_csv(MENU_CSV)
+    if r is None or m is None:
+        # 조용히 넘어가면 '후보 없음'으로만 보여 원인을 찾기 어렵다 → 로그에 남긴다
+        log.warning("식당·메뉴 CSV를 찾지 못해 적재하지 않았습니다: %s (%s, %s 필요)", DATA_DIR, RESTAURANT_CSV, MENU_CSV)
         return None
     return load_csv(session, r, m)
+
+
+def _find_csv(name: str) -> Path | None:
+    """data/ 에서 CSV를 찾는다. 압축을 풀다가 한글 파일명이 %ec%8b%9d… 처럼 깨진 경우도 알아본다."""
+    exact = DATA_DIR / name
+    if exact.exists():
+        return exact
+    if DATA_DIR.is_dir():
+        for path in DATA_DIR.iterdir():
+            if unquote(path.name) == name:
+                return path
+    return None
 
 
 if __name__ == "__main__":
@@ -153,4 +171,4 @@ if __name__ == "__main__":
 
     init_db()
     with SessionLocal() as s:
-        print("적재:", load_csv(s, DATA_DIR / RESTAURANT_CSV, DATA_DIR / MENU_CSV))
+        print("적재:", load_csv(s, _find_csv(RESTAURANT_CSV) or DATA_DIR / RESTAURANT_CSV, _find_csv(MENU_CSV) or DATA_DIR / MENU_CSV))

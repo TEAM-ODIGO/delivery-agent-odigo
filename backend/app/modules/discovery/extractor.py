@@ -14,6 +14,8 @@ from app.modules.discovery.constants import (
     CUISINES,
     DEFAULT_FAST_DELIVERY_MINUTES,
     DISH_KEYWORDS,
+    TASTE_ORDER,
+    TASTES,
 )
 
 KOREAN_DIGITS = {"일": 1, "이": 2, "삼": 3, "사": 4, "오": 5, "육": 6, "칠": 7, "팔": 8, "구": 9}
@@ -27,18 +29,34 @@ PEOPLE_ALONE = re.compile(r"혼자|혼밥|나\s*혼자")
 
 # ---------- 예산 ----------
 PER_PERSON = re.compile(r"(?:1인당|인당|한\s*명당|한\s*사람당|1명당)\s*$")
-AMOUNT_MAN = re.compile(r"(\d+(?:\.\d+)?)\s*만\s*(?:(\d)\s*천)?\s*원?")
+# 만 앞뒤에 숫자·한글 숫자가 섞여도 읽는다: 2만5천원, 2만오천원, 만5천원, 이만오천원
+AMOUNT_MAN = re.compile(r"(\d+(?:\.\d+)?)\s*만\s*(?:(\d|[일이삼사오육칠팔구])\s*천)?\s*원?")
 AMOUNT_WON = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{4,8})\s*원")
 AMOUNT_CHEON = re.compile(r"(\d+)\s*천\s*원")
 AMOUNT_KOREAN_CHEON = re.compile(r"(?<![가-힣])([일이삼사오육칠팔구])\s*천\s*원")
-AMOUNT_KOREAN = re.compile(r"(?<![가-힣])([일이삼사오육칠팔구])?\s*만\s*(?:([일이삼사오육칠팔구])\s*천)?\s*원")
+AMOUNT_KOREAN = re.compile(r"(?<![가-힣\d])([일이삼사오육칠팔구])?\s*만\s*(?:(\d|[일이삼사오육칠팔구])\s*천)?\s*원")
 
 # ---------- 맵기 ----------
 NOT_SPICY = re.compile(
     r"안\s*맵|맵지\s*않|안\s*매운|순한|맵찔|매운\s*(?:거|걸|건|것|음식)\s*(?:은|는)?\s*(?:못|안)\s*먹|하나도\s*안\s*매"
+    r"|매운\s*(?:거|걸|건|것|음식|맛)?\s*(?:은|는)?\s*(?:말고|빼고|싫|별로)"
 )
 LESS_SPICY = re.compile(r"덜\s*매운|덜\s*맵|조금만\s*매운|살짝\s*매운|약간\s*매운|적당히\s*매운")
-WANT_SPICY = re.compile(r"매운|맵게|얼큰|매콤")
+WANT_SPICY = re.compile(r"매운|맵게|얼큰|매콤|칼칼|얼얼|화끈")
+
+# ---------- 맛 취향 (매운맛은 위의 맵기 규칙으로 정한다) ----------
+TASTE_TRIGGERS = {
+    "SWEET": re.compile(r"달달|달콤|달짝|단\s*(?:거|게|걸|것|음식|맛)|디저트|후식|당\s*(?:땡|떨어|충전)"),
+    "SOUP": re.compile(r"국물|뜨끈|따끈|뜨뜻|얼큰|해장|(?:시원|따뜻|뜨거운)한?\s*(?:국|거|음식|걸)"),
+    "CRISPY": re.compile(r"바삭|튀긴|튀김|크리스피|겉바"),
+    "LIGHT": re.compile(r"담백|가벼운|가볍게|건강한|건강식|깔끔한|다이어트|속\s*편한|자극적이지\s*않|안\s*느끼"),
+    "CHEESY": re.compile(r"꾸덕|고소한|느끼한|크리미|치즈\s*(?:듬뿍|가득|많이)|진한\s*(?:거|맛|음식)"),
+}
+# '느끼한 건 싫어', '단 거 말고'처럼 뒤에서 부정하거나, '안 느끼한'처럼 앞에서 부정하면 그 맛은 원하지 않는 것
+TASTE_NEGATION_AFTER = re.compile(
+    r"^\s*(?:한|하지\s*않은)?\s*(?:거|걸|건|것|게|음식|맛)?\s*(?:은|는|이|가)?\s*(?:말고|빼고|싫|별로|제외|못\s*먹|안\s*먹|아닌)"
+)
+TASTE_NEGATION_BEFORE = re.compile(r"(?:안|덜)\s*$")
 
 # ---------- 배달 시간 ----------
 MINUTES_LIMIT = re.compile(r"(\d+)\s*분\s*(?:안|이내|내|까지|이하|만에)")
@@ -99,6 +117,13 @@ def extract_people(text: str) -> tuple[int | None, str | None]:
     return None, None
 
 
+def _digit(value: str) -> int:
+    """'5' 또는 '오' → 5"""
+    if value.isdigit():
+        return int(value)
+    return KOREAN_DIGITS[value]
+
+
 def _find_amounts(text: str) -> list[tuple[int, int, str]]:
     """문장 속 금액을 (시작 위치, 금액, 원문) 목록으로 찾는다."""
     found = []
@@ -106,7 +131,7 @@ def _find_amounts(text: str) -> list[tuple[int, int, str]]:
     for match in AMOUNT_MAN.finditer(text):
         value = float(match.group(1)) * 10000
         if match.group(2):
-            value += int(match.group(2)) * 1000
+            value += _digit(match.group(2)) * 1000
         found.append((match.start(), int(value), match.group(0).strip()))
 
     for match in AMOUNT_WON.finditer(text):
@@ -117,7 +142,7 @@ def _find_amounts(text: str) -> list[tuple[int, int, str]]:
         man = KOREAN_DIGITS.get(match.group(1), 1)
         value = man * 10000
         if match.group(2):
-            value += KOREAN_DIGITS[match.group(2)] * 1000
+            value += _digit(match.group(2)) * 1000
         found.append((match.start(), value, match.group(0).strip()))
 
     for match in AMOUNT_CHEON.finditer(text):
@@ -160,11 +185,55 @@ def extract_spice(text: str) -> tuple[int | None, str | None]:
     if match:
         return 1, f"'{match.group(0).strip()}' → max_spice_level 1"
 
-    match = WANT_SPICY.search(text)
-    if match:
-        return None, f"'{match.group(0).strip()}' → 매운맛 선호, 맵기 상한 없음"
-
+    # '매운 거'는 상한이 아니라 매운맛을 원하는 것 → extract_tastes가 SPICY로 남긴다 (상한은 비워 둠)
     return None, None
+
+
+def wants_spicy(text: str) -> bool:
+    """'매운 거'처럼 매운맛을 원하는지. '안 매운', '덜 매운', '매운 거 말고'는 원하지 않는 것으로 본다."""
+    if NOT_SPICY.search(text) or LESS_SPICY.search(text):
+        return False
+    return WANT_SPICY.search(text) is not None
+
+
+def _is_negated(text: str, match: re.Match) -> bool:
+    return bool(TASTE_NEGATION_BEFORE.search(text[:match.start()]) or TASTE_NEGATION_AFTER.search(text[match.end():]))
+
+
+def negated_tastes(text: str) -> set[str]:
+    """'느끼한 건 싫어', '매운 거 말고'처럼 싫다고 말한 맛."""
+    result = set()
+    if WANT_SPICY.search(text) and not wants_spicy(text):
+        result.add("SPICY")
+    for code, pattern in TASTE_TRIGGERS.items():
+        for match in pattern.finditer(text):
+            if _is_negated(text, match):
+                result.add(code)
+    return result
+
+
+def extract_tastes(text: str) -> tuple[list[str], str | None]:
+    """'매운', '달달한' 같은 맛 표현 → ["SPICY", "SWEET"] (TASTE_ORDER 순서)."""
+    found = {}
+    if wants_spicy(text):
+        found["SPICY"] = WANT_SPICY.search(text).group(0)
+
+    for code, pattern in TASTE_TRIGGERS.items():
+        for match in pattern.finditer(text):
+            if _is_negated(text, match):
+                continue
+            found[code] = match.group(0)
+            break
+
+    tastes = []
+    words = []
+    for code in TASTE_ORDER:
+        if code in found:
+            tastes.append(code)
+            words.append(f"'{found[code].strip()}' → 맛 취향 {TASTES[code]['label']}")
+    if not tastes:
+        return [], None
+    return tastes, ", ".join(words)
 
 
 def extract_delivery_minutes(text: str) -> tuple[int | None, str | None]:
@@ -287,6 +356,10 @@ def extract_by_rules(message: str) -> tuple[dict, dict]:
     if note:
         notes["payment_requirements"] = note
 
+    tastes, note = extract_tastes(text)
+    if note:
+        notes["taste_preferences"] = note
+
     excluded = extract_excluded_ingredients(text)
 
     # 제외 재료 단어는 음식 종류·메뉴 검색어로 잡히지 않게 지운 뒤 찾는다 ('고기 빼고' → 고기/구이 아님)
@@ -307,5 +380,100 @@ def extract_by_rules(message: str) -> tuple[dict, dict]:
         "payment_requirements": {"local_currency_only": local_only},
         "max_delivery_minutes": minutes,
         "menu_keywords": find_menu_keywords(cleaned),
+        "taste_preferences": tastes,
     }
     return constraints, notes
+
+
+# ---------------------------------------------------------------- LLM 결과 확인
+# LLM(qwen2.5 7B)은 '만오천원' → 5000, '국물' → 분식·메뉴 '국물'처럼 문장에 없는 값을 지어내기도 한다.
+# 그래서 LLM 값은 문장에 그 값의 근거가 되는 단어가 있을 때만 받는다 (service._merge에서 사용).
+
+LLM_HINTS = {
+    "budget_krw": re.compile(r"\d|원|[일이삼사오육칠팔구십백]\s*(?:만|천)|만\s*원"),
+    "people": re.compile(r"명|사람|인분|혼자|혼밥|둘|셋|넷|다섯|여섯|이서|\d\s*인|식구|가족|친구|커플|우리|분이서"),
+    "max_delivery_minutes": re.compile(r"분|빨리|빠르|빠른|급|얼른|금방|서둘"),
+    "max_spice_level": re.compile(r"맵|매운|매콤|순한|자극"),
+    "local_currency_only": re.compile(r"지역|화폐|상품권|온누리"),
+}
+# 규칙 정규식보다 넓은 '맛 근거' 단어. LLM이 규칙이 놓친 표현을 맛으로 읽었을 때 받아 줄지 본다
+TASTE_HINTS = {
+    "SPICY": re.compile(r"맵|매운|매콤|얼큰|칼칼|화끈|얼얼|자극적인"),
+    "SWEET": re.compile(r"달|단\s*(?:거|게|걸|것|음식|맛)|디저트|후식|당\s*땡|스위트"),
+    "SOUP": re.compile(r"국물|국\b|국밥|탕|찌개|뜨끈|따끈|따뜻|해장|시원한"),
+    "CRISPY": re.compile(r"바삭|튀|겉바|크리스피|크런치"),
+    "LIGHT": re.compile(r"담백|가벼|가볍|건강|깔끔|다이어트|편한|자극적이지"),
+    "CHEESY": re.compile(r"치즈|크림|꾸덕|고소|느끼|진한|크리미"),
+}
+# 메뉴 검색어로 쓰면 안 되는 일반 단어 ('국물'을 검색어로 쓰면 '국물통뼈닭발'만 찾게 된다)
+GENERIC_MENU_WORDS = {"음식", "메뉴", "거", "것", "식사", "밥", "요리", "국물", "배달", "아무거나", "야식", "간식",
+                      "점심", "저녁", "아침", "한끼", "한 끼", "디저트", "후식"}
+
+
+def has_hint(slot: str, text: str) -> bool:
+    return LLM_HINTS[slot].search(text) is not None
+
+
+def grounded_cuisine(text: str, cuisine: str | None) -> str | None:
+    """LLM이 고른 음식 종류는 그 이름이나 대표 단어가 문장에 있을 때만 받는다."""
+    name = normalize_cuisine(cuisine)
+    if name is None:
+        return None
+    words = [name] + CUISINES[name]["triggers"]
+    for word in words:
+        if word in text:
+            return name
+    return None
+
+
+def _is_taste_word(word: str) -> bool:
+    if WANT_SPICY.search(word):
+        return True
+    for pattern in TASTE_TRIGGERS.values():
+        if pattern.search(word):
+            return True
+    return False
+
+
+def _is_cuisine_word(word: str) -> bool:
+    for name, info in CUISINES.items():
+        if word == name or word in info["triggers"]:
+            return True
+    return False
+
+
+def grounded_menu_keywords(text: str, words: list[str]) -> list[str]:
+    """문장에 그대로 나온 구체적인 메뉴 이름만. 맛·음식 종류·일반 단어는 뺀다."""
+    result = []
+    for word in words:
+        word = str(word).strip()
+        if len(word) < 2 or word not in text:
+            continue
+        if word in GENERIC_MENU_WORDS or _is_taste_word(word) or _is_cuisine_word(word):
+            continue
+        result.append(word)
+    return result
+
+
+def grounded_exclusions(text: str, words: list[str]) -> list[str]:
+    """문장에 나오고, 바로 뒤에 '빼고·없이·알레르기' 같은 말이 있는 재료만."""
+    result = []
+    for word in words:
+        word = str(word).strip()
+        position = text.find(word)
+        if not word or position < 0:
+            continue
+        after = text[position + len(word):position + len(word) + 15]
+        if EXCLUDE_TRIGGER.search(after):
+            result.append(word)
+    return result
+
+
+def grounded_tastes(text: str, codes: list[str]) -> list[str]:
+    """맛 근거 단어가 있고, 싫다고 말하지 않은 맛만."""
+    negated = negated_tastes(text)
+    result = []
+    for code in codes:
+        if code in TASTE_HINTS and code not in negated and TASTE_HINTS[code].search(text):
+            result.append(code)
+    return result

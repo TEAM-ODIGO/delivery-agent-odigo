@@ -279,3 +279,11 @@ def test_ineligible_method_must_have_zero_discount(svc):
     assert svc.validate_order(make_validation(policy, inflated)).reason_codes == ["AMOUNT_MISMATCH"]
     honest = make_quote(payment_method_id="LOCAL001", instant_discount_krw=0, charge_krw=35000)
     assert svc.validate_order(make_validation(policy, honest, order_version=2)).valid
+
+
+# A 확장 조건(맛 취향)이 D-01에서 거절되지 않는다 — 새 A가 constraints에 taste_preferences를 담아 보낸다
+def test_d01_accepts_taste_preferences_from_a(svc):
+    policy = make_policy(
+        constraints={"budget_krw": 40000, "people": 2, "taste_preferences": ["SPICY", "SOUP"]}
+    )
+    assert svc.register_policy(policy).policy_id

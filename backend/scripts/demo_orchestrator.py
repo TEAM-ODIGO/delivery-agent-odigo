@@ -176,6 +176,12 @@ def o11():
     return reply(v, type="APPROVE")
 
 
+def o12():
+    """맛 취향(A 확장): 메뉴 이름 없이 '매운 음식'만 말해도 후보가 나오고 결제까지 간다"""
+    # 후보가 27,900원대라 맡긴 한도(기본 2만원)를 넘으면 D가 막는다 → 한도를 4만원으로
+    return until(start("매운 음식 둘이서 3만원 이하로", {"max_charge_krw": 40000}), "COMPLETED")
+
+
 def o9():
     v = start(OK)
     stale = dict(v, state_version=v["state_version"] - 1)
@@ -199,6 +205,7 @@ SCENARIOS = {
     "o8": ("#결제거절 → FAILED", o8, "FAILED"),
     "o9": ("오래된 화면에서 누름 → 409", o9, 409),
     "o10": ("결제 후 취소 → 409 (환불로 안내)", o10, 409),
+    "o12": ("맛 취향: '매운 음식' → 후보 → 결제 완료 (새 A)", o12, "COMPLETED"),
     "o11": ("분할결제: 지역화폐 8,000원 + 나머지 카드 (로컬 확장)", o11, "COMPLETED"),
 }
 

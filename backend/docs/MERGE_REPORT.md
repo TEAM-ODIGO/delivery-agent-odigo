@@ -62,3 +62,23 @@
 - 명세 엑셀의 B 담당자 칸은 아직 이종혁이다 → 김민지로 고칠 것.
 - 분할결제 필드는 명세에 없는 로컬 확장이다. 팀 합의 후 명세에 올리거나 걷어내야 한다.
 - 가짜 B·가짜 C는 분할을 모른다 (`USE_FAKE_B/C=1`에서 분할을 고르면 409 `SPLIT_NOT_AVAILABLE`).
+
+---
+
+# 3차 합치기 (2026-11-17 저녁): 새 A (`a-discovery-service`)
+
+## 한 일
+- `app/modules/discovery/`의 A 로직을 새 A로 바꿨다: `constants`·`extractor`·`llm`·`schemas`·`search`·`service`. 팀 공통에 맞춘 부분(DB 타입 `JsonType`·`KstDateTime`, 공통 `AppError`, 라우터 DB 세션)은 그대로 두고 import만 다시 바꿨다. `models.py`·`router.py`는 새 A 내용에 같은 방식으로 맞췄다.
+- 달라진 점 (A 안쪽에서만): **맛 취향 `taste_preferences`** (`SPICY`·`SWEET`·`SOUP`·`CRISPY`·`LIGHT`·`CHEESY`). 메뉴 이름 없이 "매운 음식", "국물 있는 거"만 말해도 후보를 찾는다. 규칙 추출이 먼저이고 LLM 값은 문장에 근거 단어가 있을 때만 받는다. 검색 점수·정렬에 맛 비율이 들어갔다. 원본 설명은 `docs/integration/A_README_원본_2026-11-17.md`.
+- A-01~A-06 입구(`facade.py`)와 후보·조건 응답 모양은 그대로다. 새 필드 `constraints.taste_preferences`만 늘었다.
+- **D가 새 필드를 거절하던 것을 고쳤다**: D-01의 `Constraints`가 모르는 필드를 400으로 막아서 `taste_preferences`가 든 주문은 D-01에서 실패했다 → D 스키마에 기록용 필드로 추가 (D 검증에는 쓰지 않음). B는 `constraints`를 그대로 보관해서 영향 없다.
+- 식당·메뉴 CSV는 새 A의 것과 내용이 같다 (md5 동일).
+- CSV 적재기를 튼튼하게 했다: 압축을 풀다가 한글 파일명이 `1_%ec%8b%9d…csv`처럼 깨져도 찾고, 못 찾으면 서버 로그에 경고를 남긴다 (예전에는 조용히 넘어가 "후보 없음"으로만 보였다).
+
+## 확인 결과
+- `pytest` 264개 통과 (SQLite). 새 A의 맛 취향 테스트 12개를 포함했다 (새 A의 DB 설정은 팀 SQLite 구조에 맞게 바꿨다).
+- 진짜 A·B·C·D·O + 진짜 E 서버: `demo_orchestrator.py` 11/13 (o5·o8은 진짜 E에서는 태그가 안 먹는 예상된 차이). 가짜 E(`E_PAYMENT_URL` 비움)에서는 13/13. 새 시나리오 `o12`: "매운 음식 둘이서 3만원 이하로" → 후보 → 결제 완료.
+
+## 알아 둘 것
+- 새 A는 단독 실행 기준 문서가 PostgreSQL 18·`DATABASE_URL`을 쓴다고 되어 있지만, 합친 서버는 팀 공통 설정(SQLite 기본)을 쓴다.
+- 맛 취향은 명세에 없는 A 확장 조건이다. D·B는 읽지 않아도 되지만 명세에는 올려야 한다.

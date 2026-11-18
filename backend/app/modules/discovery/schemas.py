@@ -1,9 +1,25 @@
 """A 모듈 요청·응답 모델 (JSON은 snake_case, 금액은 _krw 원 단위 정수)."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.modules.discovery.constants import TASTE_ORDER
 
 # 공통 규칙: ID는 문자열, 64자 이하, 영문·숫자·_ - : . 만
 ID_PATTERN = r"^[A-Za-z0-9_\-:.]{1,64}$"
+
+# 맛 취향 코드 (constants.TASTES). 명세에 없는 A 확장 조건이라 D·B는 읽지 않아도 된다
+Taste = Literal["SPICY", "SWEET", "SOUP", "CRISPY", "LIGHT", "CHEESY"]
+
+
+def ordered_tastes(values: list[str] | None) -> list[str]:
+    """중복을 빼고 TASTE_ORDER 순서로 맞춘다. 모르는 코드는 버린다 (LLM이 엉뚱한 값을 줄 때)."""
+    result = []
+    for code in TASTE_ORDER:
+        if values and code in values:
+            result.append(code)
+    return result
 
 
 class DeliveryAddress(BaseModel):
@@ -32,6 +48,8 @@ class Constraints(BaseModel):
     delivery_address: DeliveryAddress | None = None
     max_delivery_minutes: int | None = None
     menu_keywords: list[str] = Field(default_factory=list)
+    # A 확장: 메뉴 이름 없이 맛만 말했을 때 ("매운 음식" → ["SPICY"])
+    taste_preferences: list[str] = Field(default_factory=list)
 
 
 # ---------- A-01 ----------
@@ -59,6 +77,7 @@ class ConstraintsPatch(BaseModel):
     delivery_address: DeliveryAddress | None = None
     max_delivery_minutes: int | None = Field(default=None, ge=10, le=180)
     menu_keywords: list[str] | None = None
+    taste_preferences: list[Taste] | None = None
 
 
 class PatchConstraintsBody(BaseModel):
@@ -95,3 +114,11 @@ class LlmExtraction(BaseModel):
     local_currency_only: bool = False
     max_delivery_minutes: int | None = Field(default=None, ge=10, le=180)
     menu_keywords: list[str] = Field(default_factory=list)
+    taste_preferences: list[str] = Field(default_factory=list)
+
+    @field_validator("taste_preferences", mode="before")
+    @classmethod
+    def keep_known_tastes(cls, value):
+        if not isinstance(value, list):
+            return []
+        return ordered_tastes([str(code).upper() for code in value])
