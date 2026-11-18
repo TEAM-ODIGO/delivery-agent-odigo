@@ -1,0 +1,63 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+      - name: Check Python syntax
+        run: uv run --frozen python -m compileall -q app tests scripts
+      - name: Run tests
+        run: uv run --frozen pytest
+
+  payment:
+    name: E payment tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: e-payment
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+      - name: Check Python syntax
+        run: uv run --frozen python -m compileall -q e_payment tests
+      - name: Run tests
+        run: uv run --frozen pytest
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck and build
+        run: npm run build
