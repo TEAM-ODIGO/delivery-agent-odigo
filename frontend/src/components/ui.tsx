@@ -71,6 +71,18 @@ export function Button({
   );
 }
 
+// 사용자에게 예/아니오를 묻는 팝업. 바깥을 눌러도 닫히지 않는다 (반드시 답하게 한다).
+export function Modal({ label, children, actions }: { label: string; children: ReactNode; actions: ReactNode }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal" role="alertdialog" aria-modal="true" aria-label={label}>
+        <div className="modal-body">{children}</div>
+        <div className="modal-actions">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
 export function StatusIcon({ tone, children }: { tone: "ok" | "bad" | "pri"; children: ReactNode }) {
   return <div className={`status-icon ${tone}`}>{children}</div>;
 }

@@ -383,6 +383,19 @@ class OrchestratorService:
         cid = cand["candidate_id"]
         rid = run.request_id
 
+        # 예산 초과 확인(로컬 확장): 사용자가 동의했고 A가 이 후보를 예산 초과로
+        # 표시했을 때만 기록한다. 동의는 선택할 때마다 새로 정한다
+        # (이전 후보에 대한 동의가 다음 후보로 넘어가지 않게).
+        consent = bool(p.get("allow_over_budget")) and self._is_over_budget(cand)
+        self._set_ctx(
+            run,
+            over_budget=(
+                {"candidate_id": cid, "max_total_krw": cand["estimated_total_krw"]}
+                if consent
+                else None
+            ),
+        )
+
         # B가 품절로 거절할 수 있으므로 A의 선택을 확정하기 전에 주문 가능 여부를 확인한다.
         # B-01은 A의 선택 상태를 읽지 않고 후보의 식당·메뉴와 공용 카탈로그를 검증한다.
         plan_res = self._call(
@@ -627,6 +640,7 @@ class OrchestratorService:
         )
         self._to(run, RunState.VALIDATING)
 
+        self._relax_budget_if_consented(run, target["quote"])
         policy = self._policy(run)
         try:
             result = self._call(
@@ -1266,6 +1280,70 @@ class OrchestratorService:
         }
 
     @staticmethod
+    def _is_over_budget(cand: dict) -> bool:
+        """A가 이 후보를 예산 초과(BUDGET_EXCEEDED)로 표시했는가.
+
+        위반은 코드 문자열이거나 {code, ...}이다.
+        """
+        return any(
+            (v if isinstance(v, str) else v.get("code")) == "BUDGET_EXCEEDED"
+            for v in cand.get("violations", [])
+        )
+
+    def _relax_budget_if_consented(self, run: Run, quote: dict) -> None:
+        """예산 초과 후보임을 알고 계속하겠다고 한 주문의 D 예산 한도를 이번 금액까지 올린다.
+
+        D의 검사는 그대로 두고 D-01 재등록(정상 경로)으로 이 주문의 한도만 바꾼다.
+        사용자의 원래 위임 설정(run.delegation)과 A의 조건은 건드리지 않는다.
+        아래 조건을 모두 만족할 때만 올리고, 아니면 아무것도 하지 않아
+        D가 평소처럼 BUDGET_EXCEEDED로 막는다.
+        - 동의(allow_over_budget)가 있었고, 선택한 후보를 A가 예산 초과로 표시했다
+        - 최종 결제금액이 후보 화면에서 사용자가 본 금액(estimated_total_krw)을 넘지 않는다
+        """
+        consent = run.context.get("over_budget")
+        if not consent:
+            return
+        constraints = copy.deepcopy(run.context["constraints"])
+        delegation = copy.deepcopy(run.delegation)
+        limits = [
+            v
+            for v in (constraints.get("budget_krw"), delegation.get("max_charge_krw"))
+            if v is not None
+        ]
+        cap = min(limits) if limits else None
+        charge = quote["charge_krw"]
+        if cap is None or charge <= cap or charge > consent["max_total_krw"]:
+            return
+        if constraints.get("budget_krw") is not None:
+            constraints["budget_krw"] = max(constraints["budget_krw"], charge)
+        if delegation.get("max_charge_krw") is not None:
+            delegation["max_charge_krw"] = max(delegation["max_charge_krw"], charge)
+        rid = run.request_id
+        policy = self._call(
+            run,
+            "D",
+            "D-01",
+            lambda: self.d.register_policy(
+                PolicyCreate.model_validate(
+                    {
+                        "request_id": rid,
+                        "user_id": run.user_id,
+                        "original_message": run.message,
+                        "constraints_confirmed": True,
+                        "constraints": constraints,
+                        "delegation": delegation,
+                    }
+                )
+            ),
+        )
+        self._set_ctx(
+            run,
+            policy_id=policy["policy_id"],
+            policy_version=policy["policy_version"],
+            over_budget={**consent, "limit_krw": cap, "charge_krw": charge},
+        )
+
+    @staticmethod
     def _dep_error(exc: DependencyFailed) -> dict:
         return {"code": FailCode.DEPENDENCY_UNAVAILABLE, "service": exc.service, "api": exc.api}
 
@@ -1488,7 +1566,17 @@ class OrchestratorService:
         budget = ctx["constraints"].get("budget_krw")
         limit = run.delegation.get("max_charge_krw")
         cap = min(v for v in (budget, limit) if v) if (budget or limit) else None
-        if cap:
+        ob = ctx.get("over_budget") or {}
+        over_budget = None
+        if ob.get("charge_krw"):  # 사용자가 확인하고 예산을 넘겨 진행하는 주문
+            over_budget = {
+                "limit_krw": ob["limit_krw"],
+                "charge_krw": ob["charge_krw"],
+                "over_krw": ob["charge_krw"] - ob["limit_krw"],
+            }
+            over = over_budget["over_krw"]
+            checks.append(f"예산 {ob['limit_krw']:,}원보다 {over:,}원 많음 (사용자 확인)")
+        elif cap:
             checks.append(f"예산 {cap:,}원 이내")
         if run.delegation.get("allowed_payment_method_ids"):
             checks.append("허용 결제수단")
@@ -1500,6 +1588,7 @@ class OrchestratorService:
             "expires_at": ctx.get("approval_expires_at"),
             "order": self._order_view(run),
             **({"split": split} if split else {}),
+            **({"over_budget": over_budget} if over_budget else {}),
         }
 
     @staticmethod

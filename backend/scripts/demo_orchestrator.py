@@ -97,7 +97,7 @@ def show(label, r):
     print(f"   {label:<28} → {b['state']:<26} v{b['state_version']}  {extra}")
 
 
-def until(v, state):
+def until(v, state, over_budget_ok=False):
     while v["state"] != state and "_error" not in v:
         p = v.get("prompt") or {}
         if v["state"] == "NEED_CLARIFICATION":
@@ -107,7 +107,9 @@ def until(v, state):
                 answers=[{"slot": "people", "value": 2}, {"slot": "budget_krw", "value": "20000"}],
             )
         elif v["state"] == "CANDIDATES_READY":
-            v = reply(v, type="SELECT_CANDIDATE", candidate_index=p["candidates"][0]["index"])
+            extra = {"allow_over_budget": True} if over_budget_ok else {}  # 예산 초과 확인(예)
+            idx = p["candidates"][0]["index"]
+            v = reply(v, type="SELECT_CANDIDATE", candidate_index=idx, **extra)
         elif v["state"] == "PAYMENT_METHOD_SELECTION":
             v = reply(
                 v,
@@ -182,6 +184,12 @@ def o12():
     return until(start("매운 음식 둘이서 3만원 이하로", {"max_charge_krw": 40000}), "COMPLETED")
 
 
+def o13():
+    """예산 초과 확인(로컬 확장): 모든 후보 예산 초과 → 사용자가 '예' → 한도를 풀고 결제 완료"""
+    v = start("셋이서 피자 3만원대", {**DELEGATION, "max_charge_krw": 30000})
+    return until(v, "COMPLETED", over_budget_ok=True)
+
+
 def o9():
     v = start(OK)
     stale = dict(v, state_version=v["state_version"] - 1)
@@ -207,6 +215,7 @@ SCENARIOS = {
     "o10": ("결제 후 취소 → 409 (환불로 안내)", o10, 409),
     "o12": ("맛 취향: '매운 음식' → 후보 → 결제 완료 (새 A)", o12, "COMPLETED"),
     "o11": ("분할결제: 지역화폐 8,000원 + 나머지 카드 (로컬 확장)", o11, "COMPLETED"),
+    "o13": ("예산 초과 확인(예) → 한도를 풀고 결제 완료 (로컬 확장)", o13, "COMPLETED"),
 }
 
 

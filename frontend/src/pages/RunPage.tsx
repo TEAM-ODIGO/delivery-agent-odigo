@@ -16,7 +16,8 @@ export interface StepProps {
   view: RunView;
   busy: boolean;
   send: (reply: Reply) => void;
-  cancel: () => void;
+  cancel: () => void; // 확인창을 거쳐 취소
+  decline: () => void; // 사용자가 팝업에서 "아니오" → 확인창 없이 취소하고 처음 화면으로
 }
 
 export default function RunPage() {
@@ -77,6 +78,7 @@ export default function RunPage() {
     cancel: () => {
       if (window.confirm("주문을 취소할까요?")) reply.mutate({ type: "CANCEL" });
     },
+    decline: () => reply.mutate({ type: "CANCEL" }, { onSuccess: () => nav("/") }),
   };
 
   switch (view.state) {

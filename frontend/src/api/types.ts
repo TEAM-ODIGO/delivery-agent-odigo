@@ -120,6 +120,8 @@ export type Prompt =
       type: "APPROVAL";
       summary: string;
       split?: { local_currency: SplitLeg; remainder: SplitLeg };
+      // 사용자가 확인하고 예산을 넘겨 진행하는 주문일 때만 온다
+      over_budget?: { limit_krw: number; charge_krw: number; over_krw: number };
       checks: string[];
       unverified_conditions: string[];
       expires_at: string | null;
@@ -153,7 +155,11 @@ export interface RunView {
 
 export type Reply =
   | { type: "CLARIFICATION"; answers: { slot: string; value: number | string }[] }
-  | { type: "SELECT_CANDIDATE"; candidate_index: number }
+  | {
+      type: "SELECT_CANDIDATE";
+      candidate_index: number;
+      allow_over_budget?: boolean; // 예산 초과 확인(로컬 확장): 사용자가 "예"를 눌렀을 때만 true
+    }
   | {
       type: "SELECT_PAYMENT_METHOD";
       payment_method_id: string;
