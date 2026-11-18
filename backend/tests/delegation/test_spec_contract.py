@@ -19,7 +19,8 @@ from app.modules.delegation.benefits import CBenefitPort
 from app.modules.delegation.router import get_benefit_port, get_service, get_service_token
 from app.modules.delegation.service import DelegationService
 
-SPEC = json.loads((Path(__file__).parent / "spec_examples.json").read_text())["apis"]
+SPEC_PATH = Path(__file__).parent / "spec_examples.json"
+SPEC = json.loads(SPEC_PATH.read_text(encoding="utf-8"))["apis"]  # 윈도우 기본 인코딩(cp949) 대신 UTF-8
 KEY = "test-service-key"
 SPEC_NOW = datetime(2026, 11, 13, 10, 40, tzinfo=KST)  # 명세 예시 견적(11:00 만료) 직전
 
