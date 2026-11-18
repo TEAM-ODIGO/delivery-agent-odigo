@@ -71,6 +71,7 @@ def get_session() -> Iterator[Session]:
 
 def init_db(bind=None) -> None:
     """테이블 생성. MVP 1은 create_all로 충분하고, 스키마가 안정되면 Alembic으로 바꾼다."""
+    import app.modules.cart.models  # noqa: F401  (요기요 장바구니 작업)
     import app.modules.delegation.models  # noqa: F401  (테이블 등록용 import)
     import app.modules.discovery.catalog_models  # noqa: F401  (restaurant·menu)
     import app.modules.discovery.models  # noqa: F401  (A)

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { StepProps } from "../pages/RunPage";
 import type { OrderView } from "../api/types";
 import { Button, Row, Screen, StatusIcon, Tag } from "../components/ui";
+import YogiyoCart from "../components/YogiyoCart";
 import { BLOCK_REASON, EXCLUDE_REASON, FAIL_TEXT, krw } from "../lib/format";
 
 function OrderRows({ order, hideMethod }: { order: OrderView; hideMethod?: boolean }) {
@@ -51,6 +52,7 @@ export function Done({ view }: StepProps) {
         <Row label="결제 번호" value={<span className="mono">{r.payment_id}</span>} />
         <Row label="상태" value={<Tag tone="ok">{r.payment_status}</Tag>} />
       </div>
+      <YogiyoCart requestId={view.request_id} />
       <p className="center faint">실제 요기요 주문·결제는 하지 않아요 (E 모의결제).</p>
     </Screen>
   );
