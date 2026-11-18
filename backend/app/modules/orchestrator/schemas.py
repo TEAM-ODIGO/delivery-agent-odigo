@@ -53,9 +53,17 @@ class SelectPaymentMethodReply(Strict):
     local_currency_amount_krw: Annotated[int, Field(ge=1, le=10_000_000)] | None = None
 
 
+class CardTap(Strict):
+    """휴대폰이 읽은 NFC 실물 카드 정보 (로컬 확장, 팀 합의 전). 카드 일련번호(UID)만 받는다."""
+
+    serial_number: Annotated[str, Field(min_length=1, max_length=40)]
+
+
 class ApproveReply(Strict):
     type: Literal["APPROVE"]
     expected_state_version: Version
+    # NFC 카드를 태그하고 승인했을 때만 온다. O가 E에 같은 카드인지 먼저 묻고, E-01에도 함께 넘긴다
+    card_tap: CardTap | None = None
 
 
 class CancelReply(Strict):

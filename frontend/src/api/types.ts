@@ -159,7 +159,7 @@ export type Reply =
       payment_method_id: string;
       local_currency_amount_krw?: number; // 있으면 payment_method_id는 나머지를 낼 카드
     }
-  | { type: "APPROVE" }
+  | { type: "APPROVE"; card_tap?: { serial_number: string } } // card_tap: NFC 실물 카드 태그(로컬 확장)
   | { type: "CANCEL" };
 
 export interface PaymentMethod {

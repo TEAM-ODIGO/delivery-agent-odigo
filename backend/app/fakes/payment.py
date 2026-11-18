@@ -57,6 +57,10 @@ class FakePayment:
         self.ledger: dict[str, dict] = {}  # execution_id → 결제 기록
         self.requests: dict[str, dict] = {}  # execution_id → 처음 요청 body
 
+    def verify_card_tap(self, body: dict[str, Any]) -> dict[str, Any]:
+        """NFC 카드 태그 확인 (로컬 확장). 가짜 E에는 카드 등록표가 없어서 항상 통과시킨다."""
+        return {"payment_method_id": body["payment_method_id"], "matched": True, "reason_code": None}
+
     def request_payment(self, body: dict[str, Any]) -> dict[str, Any]:
         """E-01. 응답 유실 시나리오면 결제는 하고 PaymentResponseLost를 던진다."""
         exe = body["execution_id"]

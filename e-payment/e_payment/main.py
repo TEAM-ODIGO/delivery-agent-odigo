@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from e_payment import fep, schemas, service
+from e_payment import fep, nfc, schemas, service
 from e_payment.config import Settings, settings as default_settings
 from e_payment.db import Base, SessionLocal, engine, get_session
 from e_payment.dclient import DClient, HttpDClient
@@ -99,7 +99,20 @@ def create_app(
         if idempotency_key != body.execution_id:
             raise AppError(400, "VALIDATION_ERROR", "Idempotency-Key는 execution_id와 같아야 합니다.",
                            {"fields": [{"loc": "header.Idempotency-Key", "reason": "mismatch"}]})
-        return service.request_payment(db, body.model_dump(), _rid(request, body.request_id), d, _mode(x_mock_outcome))
+        return service.request_payment(
+            db, body.model_dump(), _rid(request, body.request_id), d, _mode(x_mock_outcome), cfg.nfc_cards
+        )
+
+    # ---------------- NFC 카드 태그 확인 (로컬 확장, 팀 합의 전) ----------------
+    @app.post("/internal/card-taps/verify", dependencies=[Auth], summary="NFC 실물 카드 태그 확인 (O → E)")
+    def verify_card_tap(body: schemas.CardTapCheck):
+        reason = nfc.check(cfg.nfc_cards, body.payment_method_id, body.card_tap.model_dump())
+        return {
+            "payment_method_id": body.payment_method_id,
+            "matched": reason is None,
+            "reason_code": reason,
+            "message": nfc.MESSAGES.get(reason) if reason else None,
+        }
 
     # ---------------- E-03 (E-02보다 먼저 등록: /payments/executions/... 가 {payment_id}로 읽히지 않게) ----------------
     @app.get("/payments/executions/{execution_id}", dependencies=[Auth], summary="E-03 실행 ID로 결제 조회")

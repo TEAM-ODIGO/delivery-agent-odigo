@@ -3,6 +3,8 @@
 import os
 from dataclasses import dataclass, field
 
+from e_payment.nfc import parse_cards
+
 
 def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default)
@@ -36,6 +38,9 @@ class Settings:
     reconcile_seconds: float = field(
         default_factory=lambda: float(_env("E_RECONCILE_SECONDS", "0"))
     )
+    # NFC 실물 카드(로컬 확장): 가상카드ID=카드 일련번호(UID)를 쉼표로 나열. 비우면 NFC 확인 안 함
+    #   예) CARD001=04:2C:98:1A:32:24:91,CARD002=04:AA:BB:CC:DD:EE:FF
+    nfc_cards: dict[str, str] = field(default_factory=lambda: parse_cards(_env("E_NFC_CARDS")))
 
 
 settings = Settings()

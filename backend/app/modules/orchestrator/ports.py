@@ -56,6 +56,8 @@ class PaymentPort(Protocol):  # E
 
     def get_by_execution(self, execution_id: str) -> Body: ...  # E-03
 
+    def verify_card_tap(self, body: Body) -> Body: ...  # NFC 실물 카드 태그 확인 (로컬 확장)
+
 
 class HttpPaymentPort:
     """진짜 E(또는 scripts/fake_e_server.py)를 HTTP로 부른다."""
@@ -83,6 +85,16 @@ class HttpPaymentPort:
             raise PaymentResponseLost(type(exc).__name__) from exc
         if r.status_code >= 500:
             raise PaymentResponseLost(f"E-01 {r.status_code}")
+        if r.status_code >= 400:
+            raise _app_error(r)
+        return r.json()
+
+    def verify_card_tap(self, body: Body) -> Body:
+        """결제 시작 전에 태그한 카드가 고른 가상카드와 같은지 E에 묻는다 (로컬 확장)."""
+        try:
+            r = self.http.post("/internal/card-taps/verify", json=body, headers=self.headers)
+        except httpx.HTTPError as exc:
+            raise AppError(503, "PAYMENT_UNAVAILABLE", "E 응답 없음") from exc
         if r.status_code >= 400:
             raise _app_error(r)
         return r.json()
