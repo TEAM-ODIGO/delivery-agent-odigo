@@ -8,7 +8,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
   const now = useNow();
   const prompt = view.prompt;
   if (prompt?.type !== "APPROVAL") return null;
-  const { order, checks, unverified_conditions, expires_at, split } = prompt;
+  const { order, checks, unverified_conditions, expires_at, split, over_budget } = prompt;
   const left = secondsLeft(expires_at, now);
   const expired = left === 0;
   const unverified = unverifiedTexts(unverified_conditions);
@@ -28,6 +28,12 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
         </>
       }
     >
+      {over_budget && (
+        <Banner tone="warn">
+          예산 {krw(over_budget.limit_krw)}보다 {krw(over_budget.over_krw)} 많은 주문이에요. 앞에서 확인하신 대로
+          진행돼요.
+        </Banner>
+      )}
       <div className="card">
         <div className="title-row">
           <b>{order.restaurant_name}</b>
