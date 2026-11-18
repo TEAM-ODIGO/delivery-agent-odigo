@@ -4,7 +4,7 @@
 
   O-01  A-01 → (조건 부족) [NEED_CLARIFICATION] → O-02 CLARIFICATION → A-04 → (확정되면 아래로)
              → (조건 확정) D-01 → A-05 → [CANDIDATES_READY]
-  O-02 SELECT_CANDIDATE       A-06 → B-01 → C-01 → [PAYMENT_METHOD_SELECTION]
+  O-02 SELECT_CANDIDATE       B-01 → A-06 → C-01 → [PAYMENT_METHOD_SELECTION]
   O-02 SELECT_PAYMENT_METHOD  B-05 → B-06 → D-02 → [AWAITING_APPROVAL]
   O-02 APPROVE                D-03 → B-07 → (저장: PAYING) → E-01 → 결과 반영 → B-08
   O-02 CANCEL                 D-05 → [CANCELLED]
@@ -383,8 +383,8 @@ class OrchestratorService:
         cid = cand["candidate_id"]
         rid = run.request_id
 
-        sel = self._call(run, "A", "A-06", lambda: self.a.select(rid, {"candidate_id": cid}))
-        chosen = sel["selected_candidate"]
+        # B가 품절로 거절할 수 있으므로 A의 선택을 확정하기 전에 주문 가능 여부를 확인한다.
+        # B-01은 A의 선택 상태를 읽지 않고 후보의 식당·메뉴와 공용 카탈로그를 검증한다.
         plan_res = self._call(
             run,
             "B",
@@ -394,21 +394,20 @@ class OrchestratorService:
                     "request_id": rid,
                     "user_id": run.user_id,
                     "candidate_id": cid,
-                    "restaurant_id": chosen["restaurant"]["restaurant_id"],
+                    "restaurant_id": cand["restaurant"]["restaurant_id"],
                     "items": [
                         {
                             "menu_id": i["menu_id"],
                             "option_ids": i.get("option_ids", []),
                             "quantity": i["quantity"],
                         }
-                        for i in chosen["items"]
+                        for i in cand["items"]
                     ],
-                    "constraints_version": sel.get(
-                        "constraints_version", ctx.get("constraints_version")
-                    ),
+                    "constraints_version": cand.get("constraints_version")
+                    or ctx["constraints_version"],
                     "constraints": ctx["constraints"],
                     "budget_basis": "POST_FINANCIAL",
-                    "catalog_version": CATALOG_VERSION,
+                    "catalog_version": cand.get("catalog_version") or CATALOG_VERSION,
                     "policy_id": ctx["policy_id"],
                 },
                 idempotency_key=f"{rid}:b01:{cid}",
@@ -447,6 +446,8 @@ class OrchestratorService:
             return
 
         plan = plan_res["order_plans"][0]
+        sel = self._call(run, "A", "A-06", lambda: self.a.select(rid, {"candidate_id": cid}))
+        chosen = sel["selected_candidate"]
         self._set_ctx(
             run,
             selected_candidate=chosen,
@@ -461,7 +462,15 @@ class OrchestratorService:
             detail={"api": "B-01", "order_plan_id": plan["order_plan_id"]},
         )
 
-        rec = self._call(run, "C", "C-01", lambda: self.c.recommend(self._c01_body(run, plan["quote"])))
+        rec = self._call(
+            run,
+            "C",
+            "C-01",
+            lambda: self.c.recommend(
+                self._c01_body(run, plan["quote"]),
+                idempotency_key=self._c01_key(run, plan["quote"]),
+            ),
+        )
         if not rec.get("options"):
             self._to(
                 run,
@@ -500,7 +509,7 @@ class OrchestratorService:
             "restaurant_id": q["restaurant_id"],
             "menu_subtotal_krw": q["menu_subtotal_krw"],
             "delivery_fee_krw": q["delivery_fee_krw"],
-            "catalog_version": CATALOG_VERSION,
+            "catalog_version": q.get("catalog_version") or CATALOG_VERSION,
             "payment_requirements": run.context["constraints"].get("payment_requirements")
             or {"local_currency_only": False},
             "candidate_payment_method_ids": run.delegation.get("allowed_payment_method_ids") or [],
@@ -508,6 +517,11 @@ class OrchestratorService:
         if local_amount:
             body["local_currency_amount_krw"] = local_amount
         return body
+
+    @staticmethod
+    def _c01_key(run: Run, quote: dict, local_amount: int | None = None) -> str:
+        key = f"{run.request_id}:c01:{run.context['order_plan_id']}:{quote['quote_id']}"
+        return f"{key}:split:{local_amount}" if local_amount is not None else key
 
     def _on_select_payment_method(self, run: Run, p: dict) -> None:
         ctx = run.context
@@ -520,7 +534,10 @@ class OrchestratorService:
                 run,
                 "C",
                 "C-01",
-                lambda: self.c.recommend(self._c01_body(run, ctx["quote"], local_amount)),
+                lambda: self.c.recommend(
+                    self._c01_body(run, ctx["quote"], local_amount),
+                    idempotency_key=self._c01_key(run, ctx["quote"], local_amount),
+                ),
             )
             if not any(o["payment_method_id"] == pm for o in rec_res.get("options", [])):
                 raise AppError(

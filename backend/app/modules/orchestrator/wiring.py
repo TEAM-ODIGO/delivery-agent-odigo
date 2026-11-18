@@ -60,15 +60,9 @@ def _read_approval(approval_id: str) -> dict:  # B → D-04 (읽기 전용)
 
 
 def _read_approval_for_b(approval_id: str) -> dict:
-    """B-07용 D-04 읽기. D-04 명세 응답에는 proposal_hash가 없는데 진짜 B는 hash가 없으면
-    '실행 준비 안 됨'으로 막는다 → D가 저장한 hash를 읽기 전용으로 함께 넘긴다 (명세 협의 필요)."""
-    from app.modules.delegation.models import Approval
-
+    """B-07 내부 호출. 승인 원본 해시는 D 서비스에서만 읽는다."""
     with SessionLocal() as s:
-        out = delegation_service(s).get_approval(approval_id).model_dump(mode="json")
-        row = s.get(Approval, approval_id)
-        out["proposal_hash"] = row.proposal_hash if row is not None else None
-        return out
+        return delegation_service(s).get_approval_for_execution(approval_id)
 
 
 def _check_authorization(body: dict, request_id: str) -> dict:  # E → D-06

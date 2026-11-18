@@ -69,12 +69,12 @@ class FlakyRecommendation:
     def __init__(self, real, fail_times):
         self.real, self.left, self.calls = real, fail_times, 0
 
-    def recommend(self, body):
+    def recommend(self, body, *, idempotency_key=None):
         self.calls += 1
         if self.left > 0:
             self.left -= 1
             raise AppError(503, "BENEFIT_UNAVAILABLE", "C 응답 없음")
-        return self.real.recommend(body)
+        return self.real.recommend(body, idempotency_key=idempotency_key)
 
 
 def test_r4_transient_failure_keeps_screen_state(env):
@@ -117,6 +117,56 @@ def test_r4_transient_failure_keeps_screen_state(env):
     )
     assert ok["state"] == "PAYMENT_METHOD_SELECTION"
     assert len(env.world.ordering.plans) == 1
+
+
+def test_c01_response_loss_reuses_real_c_recommendation(env):
+    """C가 추천을 저장한 뒤 응답만 잃어도 O의 재시도는 기존 추천을 받는다."""
+    from app.modules.benefit import facade, service
+    from app.modules.benefit.catalog_source import use_shared_restaurants
+
+    service.reset_state()
+    use_shared_restaurants()
+
+    class LostOnce:
+        def __init__(self):
+            self.first_id = None
+            self.keys = []
+
+        def recommend(self, body, *, idempotency_key=None):
+            self.keys.append(idempotency_key)
+            result = facade.recommend(body, idempotency_key=idempotency_key)
+            if self.first_id is None:
+                self.first_id = result["recommendation_id"]
+                raise AppError(503, "RESPONSE_LOST", "C 응답 유실")
+            return result
+
+        def list_methods(self, user_id):
+            return env.world.benefit.list_methods(user_id)
+
+    c = LostOnce()
+    try:
+        v = env.start()
+        from tests.orchestrator.conftest import REPLY
+
+        selected = env.svc(benefit=c).reply(
+            "U001",
+            v["request_id"],
+            REPLY.validate_python(
+                {
+                    "type": "SELECT_CANDIDATE",
+                    "candidate_index": 0,
+                    "expected_state_version": v["state_version"],
+                }
+            ),
+            None,
+        )
+        assert selected["state"] == "PAYMENT_METHOD_SELECTION"
+        assert selected["prompt"]["options"]
+        assert selected["request_id"] == v["request_id"]
+        assert len(c.keys) == 2 and c.keys[0] == c.keys[1] and c.keys[0]
+        assert service.view_recommendation(c.first_id)["status"] == "ACTIVE"
+    finally:
+        service.reset_state()
 
 
 def test_r5_discovery_down_on_start(env):

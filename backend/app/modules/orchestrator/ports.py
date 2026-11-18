@@ -48,7 +48,7 @@ class OrderingPort(Protocol):  # B
 
 
 class RecommendationPort(Protocol):  # C
-    def recommend(self, body: Body) -> Body: ...  # C-01
+    def recommend(self, body: Body, *, idempotency_key: str | None = None) -> Body: ...  # C-01
 
 
 class PaymentPort(Protocol):  # E
