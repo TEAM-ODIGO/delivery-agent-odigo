@@ -49,6 +49,10 @@ class Constraints(Strict):
     menu_keywords: list[Annotated[str, Field(max_length=30)]] = Field(
         default_factory=list, max_length=20
     )
+    # A 확장 조건: 메뉴 이름 없이 맛만 말했을 때 ("매운 음식" → ["SPICY"]). D 검증에는 쓰지 않고 기록용
+    taste_preferences: list[Annotated[str, Field(max_length=20)]] = Field(
+        default_factory=list, max_length=10
+    )
     # 배달 주소는 개인정보라 받기만 하고 저장·로그에서 뺀다 (exclude=True → model_dump에 안 나옴).
     delivery_address: Annotated[Any, Field(exclude=True)] = None
 
