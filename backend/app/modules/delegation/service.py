@@ -406,6 +406,13 @@ class DelegationService:
             revoke_reason=a.revoke_reason,
         )
 
+    def get_approval_for_execution(self, approval_id: str) -> dict:
+        """B-07 내부 호출에 필요한 승인 상태와 원본 해시를 D 경계에서 제공한다."""
+        out = self.get_approval(approval_id).model_dump(mode="json")
+        approval = self.session.get(Approval, approval_id)
+        out["proposal_hash"] = approval.proposal_hash
+        return out
+
     # ------------------------------------------------------------------ D-05
     def revoke(self, approval_id: str, body: RevokeRequest) -> RevokeOut:
         now = self.now()

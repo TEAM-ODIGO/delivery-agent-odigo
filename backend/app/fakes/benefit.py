@@ -107,7 +107,9 @@ class FakeBenefit:
         }
 
     # --- C-01 ---------------------------------------------------------------------
-    def recommend(self, body: dict[str, Any]) -> dict[str, Any]:
+    def recommend(
+        self, body: dict[str, Any], *, idempotency_key: str | None = None
+    ) -> dict[str, Any]:
         rest = catalog.restaurant(body["restaurant_id"])
         subtotal, fee = body["menu_subtotal_krw"], body["delivery_fee_krw"]
         local_only = (body.get("payment_requirements") or {}).get("local_currency_only", False)

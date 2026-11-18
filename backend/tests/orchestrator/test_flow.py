@@ -10,7 +10,7 @@ O7  결제 거절 → FAILED, B-08 장애는 '전달 대기'로 남았다가 rec
 """
 
 from app.modules.delegation.constants import ApprovalStatus, EventType
-from tests.orchestrator.conftest import OK_MESSAGE
+from tests.orchestrator.conftest import OK_MESSAGE, REPLY
 
 
 def _types(events, event_type):
@@ -51,8 +51,8 @@ def test_o1_happy_path_until_payment(env):
         "A-01",
         "D-01",
         "A-05",
-        "A-06",
         "B-01",
+        "A-06",
         "C-01",
         "B-05",
         "B-06",
@@ -76,6 +76,49 @@ def test_o1_happy_path_until_payment(env):
     assert EventType.PAYMENT_CHECK in [log.event_type for log in logs]
     # B는 같은 결과를 한 번만 받았다
     assert len(env.world.ordering.payment_events) == 1
+
+
+def test_sold_out_candidate_does_not_lock_real_a_style_selection(env):
+    """A가 첫 선택 뒤 재선택을 거부해도 B 품절 뒤 남은 후보를 선택할 수 있다."""
+
+    class SelectOnce:
+        def __init__(self, inner):
+            self.inner = inner
+            self.selected = []
+
+        def select(self, request_id, body):
+            if self.selected:
+                raise AssertionError("A에 두 번째 후보 선택을 요청했습니다")
+            self.selected.append(body["candidate_id"])
+            return self.inner.select(request_id, body)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    guarded_a = SelectOnce(env.world.discovery)
+    first = env.start(OK_MESSAGE + " #품절")
+    svc = env.svc(discovery=guarded_a)
+
+    def pick(view, index):
+        return svc.reply(
+            "U001",
+            view["request_id"],
+            REPLY.validate_python(
+                {
+                    "type": "SELECT_CANDIDATE",
+                    "candidate_index": index,
+                    "expected_state_version": view["state_version"],
+                }
+            ),
+            None,
+        )
+
+    after_sold_out = pick(first, 0)
+    assert after_sold_out["state"] == "CANDIDATES_READY"
+    assert guarded_a.selected == []
+    chosen = pick(after_sold_out, 1)
+    assert chosen["state"] == "PAYMENT_METHOD_SELECTION"
+    assert len(guarded_a.selected) == 1
 
 
 def test_o2_clarification_registers_policy_only_after_confirmed(env):
