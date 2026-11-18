@@ -7,7 +7,10 @@
 
 - 사용자 토큰: DEV_USER_TOKENS의 첫 토큰 (기본 dev-token-U001)
 - ADMIN_ACCESS_TOKEN이 있으면 각 주문의 O-04 기록(호출 순서)도 보여 준다.
-- 결제 관련 태그(#결제거절 등)는 같은 프로세스의 가짜 E일 때만 동작한다 (E_PAYMENT_URL 비움).
+- 별도 e-payment와 함께 전부 실행하려면 백엔드 O_DEMO_E_OVERRIDE=1,
+  e-payment E_ALLOW_MOCK_OVERRIDE=1로 각각 재시작한다. 이때 O가 결제 태그를
+  E-01의 X-Mock-Outcome 헤더로 전달한다 (시연 전용).
+- 별도 scripts/fake_e_server.py는 요청별 헤더를 지원하지 않는다.
 """
 
 import os
@@ -94,7 +97,7 @@ def show(label, r):
     print(f"   {label:<28} → {b['state']:<26} v{b['state_version']}  {extra}")
 
 
-def until(v, state):
+def until(v, state, over_budget_ok=False):
     while v["state"] != state and "_error" not in v:
         p = v.get("prompt") or {}
         if v["state"] == "NEED_CLARIFICATION":
@@ -104,7 +107,9 @@ def until(v, state):
                 answers=[{"slot": "people", "value": 2}, {"slot": "budget_krw", "value": "20000"}],
             )
         elif v["state"] == "CANDIDATES_READY":
-            v = reply(v, type="SELECT_CANDIDATE", candidate_index=p["candidates"][0]["index"])
+            extra = {"allow_over_budget": True} if over_budget_ok else {}  # 예산 초과 확인(예)
+            idx = p["candidates"][0]["index"]
+            v = reply(v, type="SELECT_CANDIDATE", candidate_index=idx, **extra)
         elif v["state"] == "PAYMENT_METHOD_SELECTION":
             v = reply(
                 v,
@@ -173,6 +178,18 @@ def o11():
     return reply(v, type="APPROVE")
 
 
+def o12():
+    """맛 취향(A 확장): 메뉴 이름 없이 '매운 음식'만 말해도 후보가 나오고 결제까지 간다"""
+    # 후보가 27,900원대라 맡긴 한도(기본 2만원)를 넘으면 D가 막는다 → 한도를 4만원으로
+    return until(start("매운 음식 둘이서 3만원 이하로", {"max_charge_krw": 40000}), "COMPLETED")
+
+
+def o13():
+    """예산 초과 확인(로컬 확장): 모든 후보 예산 초과 → 사용자가 '예' → 한도를 풀고 결제 완료"""
+    v = start("셋이서 피자 3만원대", {**DELEGATION, "max_charge_krw": 30000})
+    return until(v, "COMPLETED", over_budget_ok=True)
+
+
 def o9():
     v = start(OK)
     stale = dict(v, state_version=v["state_version"] - 1)
@@ -196,7 +213,9 @@ SCENARIOS = {
     "o8": ("#결제거절 → FAILED", o8, "FAILED"),
     "o9": ("오래된 화면에서 누름 → 409", o9, 409),
     "o10": ("결제 후 취소 → 409 (환불로 안내)", o10, 409),
+    "o12": ("맛 취향: '매운 음식' → 후보 → 결제 완료 (새 A)", o12, "COMPLETED"),
     "o11": ("분할결제: 지역화폐 8,000원 + 나머지 카드 (로컬 확장)", o11, "COMPLETED"),
+    "o13": ("예산 초과 확인(예) → 한도를 풀고 결제 완료 (로컬 확장)", o13, "COMPLETED"),
 }
 
 

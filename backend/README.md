@@ -48,12 +48,30 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 ```
 
 - 실패 상황은 주문 문장의 태그로 고른다: `#품절` `#모두품절` `#혜택불일치` `#결제거절` `#결제미확정` `#응답유실` `#B08장애` `#A장애` (`app/fakes/scenario.py`)
+- 별도 `e-payment`를 쓰면서 `#결제거절`·`#결제미확정`을 주문별로 시연하려면 백엔드 `.env`에 `O_DEMO_E_OVERRIDE=1`, E의 `.env`에 `E_ALLOW_MOCK_OVERRIDE=1`을 설정하고 두 서버를 재시작한다. 이 설정은 시연·테스트 전용이며 일반 요청에는 `X-Mock-Outcome` 헤더를 보내지 않는다.
+- `#응답유실`은 시연 모드에서 O가 E의 응답만 유실된 것으로 처리한다. E의 결제 기록은 남고 O는 E-03으로 상태를 확인한다.
 - `.env`에 `ADMIN_ACCESS_TOKEN`을 넣으면 주문마다 O-04 호출 순서도 보여 준다.
 - E를 별도 서버로 띄워 D-06을 HTTP로 확인하려면:
   ```bash
   uv run --env-file .env uvicorn scripts.fake_e_server:app --port 8002   # 가짜 E (D_URL 기본 localhost:8000)
-  # .env에 E_PAYMENT_URL=http://localhost:8002 넣고 모놀리스 재시작. 결과는 FAKE_E_MODE=APPROVE|DECLINE|UNKNOWN
+  # .env에 E_PAYMENT_URL=http://localhost:8002 넣고 모놀리스 재시작. 이 서버는 FAKE_E_MODE=APPROVE|DECLINE|UNKNOWN만 지원한다.
   ```
+
+## 요기요 장바구니 담기 (O-13 · O-14)
+
+승인 화면과 결제 완료 화면의 **요기요 장바구니에 담기** 버튼이 B 견적과 같은 메뉴를 요기요 장바구니에 담고,
+금액을 견적과 맞춰 본 뒤 캡처를 보여 준다. **요기요의 주문하기·결제는 절대 누르지 않는다.**
+
+- `POST /orchestrator/runs/{request_id}/yogiyo-cart` (O-13, 202): 담기 작업 시작. 승인 대기·결제 중·완료 상태에서만 된다 (그 외 409 `CART_NOT_AVAILABLE`). 진행 중이면 같은 작업을 돌려준다.
+- `GET /orchestrator/runs/{request_id}/yogiyo-cart` (O-14): 최근 작업. `QUEUED`·`RUNNING` → `CART_READY`(견적과 같음) / `CART_MISMATCH`(다름, `mismatches`) / `FAILED`(`error`). 없으면 `{"status": "NONE"}`.
+- 모드는 `.env`의 `YOGIYO_CART_MODE`로 고른다 (`.env.example` 참고).
+  - `fake`(기본): Playwright 없이 견적대로 담긴 것처럼 응답. 주문 문장에 `#요기요불일치`·`#요기요실패`를 넣으면 그 결과를 시연한다.
+  - `real`: 진짜 요기요를 연다. 준비: `uv sync --extra yogiyo` → `uv run playwright install chromium`. 시연할 때는 `YOGIYO_CART_HEADLESS=0`: 요기요 창이 뜨고, 새 주문을 시작할 때까지 열려 있다 (`YOGIYO_CART_KEEP_BROWSER=1`, 기본). 다시 담기를 누르면 창을 새로 열어 처음부터 담는다.
+  - `off`: 버튼을 누르면 503 `CART_DISABLED`.
+- 서버 없이 Playwright만 확인: `uv run python scripts/yogiyo_cart_try.py --headed` (`--check-only`는 식당 페이지가 열리는지만).
+- 지금 요기요 주문을 받지 않는 가게("요기요 서비스가 제공되지 않습니다")는 바로 실패로 알려 준다.
+- 담긴 장바구니 원본은 캡처 옆 `{작업id}-cart.json`에 남는다 (요기요 형식이 바뀌었을 때 확인용).
+- 요기요 장바구니는 그 브라우저 탭 안에만 있다. 창을 닫으면 사라지므로 화면에는 캡처로 남긴다.
 
 ## C(혜택)와 함께 확인
 

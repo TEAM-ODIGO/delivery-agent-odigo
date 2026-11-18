@@ -43,6 +43,9 @@ class SelectCandidateReply(Strict):
     type: Literal["SELECT_CANDIDATE"]
     expected_state_version: Version
     candidate_index: Annotated[int, Field(ge=0, le=50)]
+    # 예산 초과 확인(로컬 확장, 팀 합의 전): 예산을 넘는 가게임을 알고 계속하겠다고 했는가.
+    # 안 보내거나 false면 기존과 같이 D가 예산 초과를 막는다.
+    allow_over_budget: bool = False
 
 
 class SelectPaymentMethodReply(Strict):

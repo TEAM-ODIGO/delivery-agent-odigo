@@ -73,12 +73,14 @@ class HttpPaymentPort:
         self.http = client or httpx.Client(base_url=base_url, timeout=timeout)
         self.headers = {"Authorization": f"Bearer {service_token}", "Accept": "application/json"}
 
-    def request_payment(self, body: Body) -> Body:
+    def request_payment(self, body: Body, *, mock_outcome: str | None = None) -> Body:
         headers = {
             **self.headers,
             "X-Request-ID": body["request_id"],
             "Idempotency-Key": body["execution_id"],
         }
+        if mock_outcome is not None:
+            headers["X-Mock-Outcome"] = mock_outcome
         try:
             r = self.http.post("/payments", json=body, headers=headers)
         except httpx.HTTPError as exc:  # 타임아웃·연결 끊김: E가 처리했을 수도 있다

@@ -3,8 +3,11 @@
 순서
 1. 가게 거르기: 음식 종류, '지역화폐만' 조건
 2. 가게마다 담을 수 있는 메뉴 거르기: 품절·주류·제외 재료·맵기·음식 종류 단어
+   + 원하는 맛(taste_preferences)인지 표시: 매운맛은 맵기 2단계 이상, 국물은 국물 유무 데이터, 나머지는 메뉴 이름
 3. 인원수만큼 먹을 수 있는 장바구니(메뉴 1~2종)를 만들어 최소주문금액·배달비·예산을 계산
+   (원하는 메뉴·맛이 들어간 장바구니를 먼저 고른다)
 4. 배달 시간·예산을 벗어나면 violations에 적고, 점수를 매겨 순위를 정함
+   (맛을 말했으면 '가게 메뉴 중 그 맛 메뉴 비율'을 주력 점수로 씀 → 매운 메뉴 하나뿐인 가게보다 떡볶이·짬뽕집이 위)
 5. 모두 만족하는 후보가 모자라면 조건을 얼마나 풀면 되는지(relaxation_suggestions) 계산
 
 A는 다른 모듈을 부르지 않는다. 지역화폐 여부도 restaurant 테이블 열만 읽는다.
@@ -18,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.discovery.catalog_models import Menu, Restaurant
-from app.modules.discovery.constants import CUISINES, SPICY_NAME_WORDS
+from app.modules.discovery.constants import CUISINES, SPICY_NAME_WORDS, TASTES
 
 ORDERABLE_TYPES = ("main", "set")
 MIN_ITEM_PRICE_KRW = 1000  # 이보다 싼 메인은 옵션성 항목으로 보고 담지 않음
@@ -28,6 +31,11 @@ SIDE_LIKE_PRICE_RATIO = 0.4  # 가게 메인 메뉴 중간 가격의 40% 미만�
 TOP_ITEMS_PER_RESTAURANT = 10
 MAX_QUANTITY = 10
 VIOLATION_PENALTY = 20.0
+SPICY_MIN_LEVEL = 2  # 매운 걸 원할 때 맵기 데이터가 이 단계 이상이어야 매운 메뉴로 본다 (1은 '약간')
+TASTE_FULL_SHARE = 0.5  # 담을 수 있는 메뉴의 절반 이상이 원하는 맛이면 주력 점수 만점
+TASTE_MAIN_SHARE = 0.2  # 원하는 맛 메뉴가 이 비율 이상이면 '그 맛을 주로 파는 가게'로 보고 먼저 보여 준다
+KEYWORD_BONUS = 3.0
+TASTE_BONUS = 2.5  # 원하는 맛 메뉴가 가게 상위 10개 메뉴 안에 남도록 선호도에 더한다
 
 # 이름에 이런 단어가 있으면 보통 2인 이상이 먹는 메뉴로 본다 (인분 정보가 없을 때만)
 SHARING_WORDS = ["치킨", "마리", "반반", "피자", "족발", "보쌈", "찜닭", "아구찜", "해물찜", "전골", "감자탕"]
@@ -40,9 +48,20 @@ SERVINGS_IN_NAME = re.compile(r"(\d{1,2})(?:\s*~\s*\d{1,2})?\s*인(?!분주문)"
 class Item:
     menu: Menu
     servings: float
-    preference: float
+    base_preference: float  # 대표·인기·리뷰로만 계산한 선호도 (점수의 '메뉴 선호'에 씀)
     keyword_hit: bool
+    taste_hit: bool  # 원하는 맛을 모두 만족하는 메뉴인지 (맛을 말하지 않았으면 False)
     spice_known: bool
+
+    @property
+    def preference(self) -> float:
+        """장바구니를 고를 때 쓰는 선호도. 사용자가 말한 메뉴·맛이면 더 높게."""
+        total = self.base_preference
+        if self.keyword_hit:
+            total += KEYWORD_BONUS
+        if self.taste_hit:
+            total += TASTE_BONUS
+        return total
 
     @property
     def is_light(self) -> bool:
@@ -71,6 +90,7 @@ class Basket:
 class Evaluation:
     restaurant: Restaurant
     basket: Basket | None = None
+    taste_share: float = 0.0  # 담을 수 있는 메뉴 중 원하는 맛 메뉴 비율
     violations: list[dict] = field(default_factory=list)
     hard_exclusion: str | None = None  # 값이 있으면 후보로 내보내지 않음
     score: float = 0.0
@@ -148,6 +168,56 @@ def contains_any(text: str, words: list[str]) -> str | None:
     return None
 
 
+def matches_taste(menu: Menu, code: str) -> bool:
+    """이 메뉴가 그 맛인지. 순서: 이름에 확실한 단어 → 수집 데이터 → 이름의 일반 단어 (constants.TASTES 주석)."""
+    info = TASTES[code]
+    if contains_any(menu.name, info["force_words"]):
+        return True
+    if contains_any(menu.name, info["block_words"]):
+        return False
+
+    if code == "SPICY" and menu.spice_level is not None:
+        return menu.spice_level >= SPICY_MIN_LEVEL
+    if code == "SOUP" and menu.has_soup is not None:
+        return menu.has_soup
+    # 담백한 것을 원하면 데이터상 맵기 2단계 이상은 뺀다
+    if code == "LIGHT" and menu.spice_level is not None and menu.spice_level >= SPICY_MIN_LEVEL:
+        return False
+
+    return contains_any(menu.name, info["menu_words"]) is not None
+
+
+def matches_all_tastes(menu: Menu, tastes: list[str]) -> bool:
+    if not tastes:
+        return False
+    for code in tastes:
+        if not matches_taste(menu, code):
+            return False
+    return True
+
+
+def taste_labels(tastes: list[str]) -> str:
+    labels = []
+    for code in tastes:
+        labels.append(TASTES[code]["label"])
+    return "·".join(labels)
+
+
+def taste_evidence(menu: Menu, tastes: list[str]) -> str:
+    """추천 이유에 쓸 근거. 예: '매운(맵기 3단계)·국물(국물 있음)'"""
+    parts = []
+    for code in tastes:
+        label = TASTES[code]["label"]
+        # 데이터가 판단과 같은 방향일 때만 데이터를 근거로 보여 준다 (이름 규칙으로 뒤집은 경우는 '이름 기준')
+        if code == "SPICY" and menu.spice_level is not None and menu.spice_level >= SPICY_MIN_LEVEL:
+            parts.append(f"{label}(맵기 {menu.spice_level}단계)")
+        elif code == "SOUP" and menu.has_soup:
+            parts.append(f"{label}(국물 있음)")
+        else:
+            parts.append(f"{label}(메뉴 이름 기준)")
+    return "·".join(parts)
+
+
 def build_item(menu: Menu, constraints: dict) -> Item | None:
     """담을 수 없는 메뉴면 None."""
     if menu.is_sold_out or menu.is_alcohol:
@@ -182,10 +252,9 @@ def build_item(menu: Menu, constraints: dict) -> Item | None:
 
     keywords = constraints.get("menu_keywords") or []
     keyword_hit = contains_any(menu.name, keywords) is not None
+    taste_hit = matches_all_tastes(menu, constraints.get("taste_preferences") or [])
 
     preference = 0.0
-    if keyword_hit:
-        preference += 3.0
     if menu.is_signature:
         preference += 1.5
     if menu.is_popular:
@@ -195,8 +264,9 @@ def build_item(menu: Menu, constraints: dict) -> Item | None:
     return Item(
         menu=menu,
         servings=estimate_servings(menu),
-        preference=preference,
+        base_preference=preference,
         keyword_hit=keyword_hit,
+        taste_hit=taste_hit,
         spice_known=spice_known,
     )
 
@@ -273,6 +343,13 @@ def basket_preference(basket: Basket) -> float:
     return total / len(basket.lines)
 
 
+def basket_base_preference(basket: Basket) -> float:
+    total = 0.0
+    for item, _ in basket.lines:
+        total += item.base_preference
+    return total / len(basket.lines)
+
+
 def has_keyword(basket: Basket) -> bool:
     for item, _ in basket.lines:
         if item.keyword_hit:
@@ -280,15 +357,26 @@ def has_keyword(basket: Basket) -> bool:
     return False
 
 
+def has_taste(basket: Basket) -> bool:
+    for item, _ in basket.lines:
+        if item.taste_hit:
+            return True
+    return False
+
+
 def choose_basket(baskets: list[Basket], budget_krw: int | None) -> Basket | None:
     """예산 안이면 선호도가 높은 것, 예산 안이 하나도 없으면 가장 싼 것 (근접 후보용).
-    사용자가 말한 메뉴(menu_keywords)가 들어간 장바구니가 있으면 그것들 중에서만 고른다."""
+    사용자가 말한 메뉴(menu_keywords)·맛(taste_preferences)이 들어간 장바구니가 있으면 그것들 중에서만 고른다."""
     if not baskets:
         return None
 
     with_keyword = [basket for basket in baskets if has_keyword(basket)]
     if with_keyword:
         baskets = with_keyword
+
+    with_taste = [basket for basket in baskets if has_taste(basket)]
+    if with_taste:
+        baskets = with_taste
 
     if budget_krw is None:
         within = baskets
@@ -318,6 +406,14 @@ def evaluate(restaurant: Restaurant, menus: list[Menu], constraints: dict) -> Ev
         if item is not None:
             items.append(item)
     items = drop_side_like(items)
+
+    if items and constraints.get("taste_preferences"):
+        hits = 0
+        for item in items:
+            if item.taste_hit:
+                hits += 1
+        evaluation.taste_share = hits / len(items)
+
     items.sort(key=lambda item: -item.preference)
     items = items[:TOP_ITEMS_PER_RESTAURANT]
 
@@ -366,7 +462,9 @@ def clamp(value: float, low: float, high: float) -> float:
 
 def compute_score(evaluation: Evaluation, constraints: dict) -> float:
     """0~100점. 별점 30 · 리뷰 수 10 · 배달 속도 15 · 가격 15 · 메뉴 선호 10 · 주력 음식 10 · 요청 메뉴 10,
-    조건 위반마다 -20."""
+    조건 위반마다 -20.
+    주력 음식 10점: 음식 종류만 말했으면 그 종류가 가게 주력인지, 맛만 말했으면 가게 메뉴 중 그 맛 비율,
+    둘 다 말했으면 5점씩."""
     restaurant = evaluation.restaurant
     basket = evaluation.basket
 
@@ -388,11 +486,8 @@ def compute_score(evaluation: Evaluation, constraints: dict) -> float:
         people = constraints.get("people") or 1
         price_score = 15.0 * clamp(1.0 - basket.total_krw / (people * 25000 * 1.5), 0.0, 1.0)
 
-    # 키워드 가점(3점)은 아래 keyword_score에서 따로 주므로 여기서는 인기·대표·리뷰만 본다
-    preference = basket_preference(basket)
-    if has_keyword(basket):
-        preference -= 3.0
-    menu_score = clamp(preference / 3.0, 0.0, 1.0) * 10.0
+    # 메뉴·맛 가점은 아래 keyword_score·cuisine_score에서 따로 주므로 여기서는 인기·대표·리뷰만 본다
+    menu_score = clamp(basket_base_preference(basket) / 3.0, 0.0, 1.0) * 10.0
 
     keywords = constraints.get("menu_keywords") or []
     if not keywords or has_keyword(basket):
@@ -401,9 +496,17 @@ def compute_score(evaluation: Evaluation, constraints: dict) -> float:
         keyword_score = 0.0
 
     if is_primary_cuisine(restaurant, constraints.get("cuisine")):
-        cuisine_score = 10.0
+        kind_score = 10.0
     else:
-        cuisine_score = 4.0
+        kind_score = 4.0
+    if constraints.get("taste_preferences"):
+        taste_score = clamp(evaluation.taste_share / TASTE_FULL_SHARE, 0.0, 1.0) * 10.0
+        if constraints.get("cuisine"):
+            cuisine_score = (kind_score + taste_score) / 2
+        else:
+            cuisine_score = taste_score
+    else:
+        cuisine_score = kind_score
 
     total = rating_score + review_score + speed_score + price_score + menu_score + cuisine_score + keyword_score
     total -= VIOLATION_PENALTY * len(evaluation.violations)
@@ -436,6 +539,12 @@ def default_reasons(evaluation: Evaluation, constraints: dict) -> list[str]:
     for item, _ in basket.lines:
         if item.keyword_hit:
             details.append(f"'{item.menu.name}' 포함")
+            break
+    tastes = constraints.get("taste_preferences") or []
+    for item, _ in basket.lines:
+        if item.taste_hit:
+            details.append(f"'{item.menu.name}' {taste_evidence(item.menu, tastes)}")
+            details.append(f"가게 메뉴 중 {taste_labels(tastes)} 메뉴 {evaluation.taste_share:.0%}")
             break
     max_spice = constraints.get("max_spice_level")
     if max_spice is not None:
@@ -497,6 +606,12 @@ def miss_distance(evaluation: Evaluation) -> float:
     return distance
 
 
+def is_taste_main(evaluation: Evaluation, tastes: list[str]) -> bool:
+    if not tastes:
+        return True
+    return evaluation.taste_share >= TASTE_MAIN_SHARE
+
+
 def pick_top(evaluations: list[Evaluation], top_n: int) -> list[Evaluation]:
     picked = []
     brands = set()
@@ -512,7 +627,7 @@ def pick_top(evaluations: list[Evaluation], top_n: int) -> list[Evaluation]:
 
 
 def relaxation_suggestions(evaluations: list[Evaluation], constraints: dict, needed: int,
-                           require_keyword: bool) -> list[dict]:
+                           require_keyword: bool, require_taste: bool) -> list[dict]:
     """조건 하나만 풀면 후보가 되는 가게를 세어, 얼마나 풀면 needed곳을 더 볼 수 있는지 알려 준다."""
     suggestions = []
 
@@ -523,6 +638,8 @@ def relaxation_suggestions(evaluations: list[Evaluation], constraints: dict, nee
         if evaluation.basket is None:
             continue
         if require_keyword and not has_keyword(evaluation.basket):
+            continue
+        if require_taste and not has_taste(evaluation.basket):
             continue
         if evaluation.hard_exclusion == "LOCAL_CURRENCY_NOT_CONFIRMED":
             if not evaluation.violations:
@@ -595,11 +712,22 @@ def search(db: Session, constraints: dict, top_n: int) -> tuple[list[dict], list
             showable = with_keyword
             require_keyword = True
 
+    # 원하는 맛(예: 매운) 메뉴를 담은 가게가 하나라도 있으면 그 가게들만 후보로 둔다
+    tastes = constraints.get("taste_preferences") or []
+    require_taste = False
+    if tastes:
+        with_taste = [e for e in showable if has_taste(e.basket)]
+        if with_taste:
+            showable = with_taste
+            require_taste = True
+
     meeting = [e for e in showable if not e.violations]
     near_miss = [e for e in showable if e.violations]
 
-    meeting.sort(key=lambda e: -e.score)
-    near_miss.sort(key=lambda e: (len(e.violations), round(miss_distance(e), 2), -e.score))
+    # 맛을 말했으면 그 맛을 주로 파는 가게를 먼저 세우고, 모자라면 그 맛 메뉴가 있는 다른 가게로 채운다
+    # (매운 메뉴가 하나뿐인 타코야끼집이 별점만으로 떡볶이·짬뽕집을 앞서지 않게)
+    meeting.sort(key=lambda e: (not is_taste_main(e, tastes), -e.score))
+    near_miss.sort(key=lambda e: (len(e.violations), not is_taste_main(e, tastes), round(miss_distance(e), 2), -e.score))
 
     meeting_chosen = pick_top(meeting, top_n)
     if meeting_chosen:
@@ -611,9 +739,11 @@ def search(db: Session, constraints: dict, top_n: int) -> tuple[list[dict], list
     suggestions = []
     if constraints.get("menu_keywords") and not require_keyword:
         suggestions.extend(keyword_suggestions(restaurants, menus_by_restaurant, constraints))
+    if tastes and not require_taste:
+        suggestions.append(taste_suggestion(constraints))
     if len(meeting_chosen) < top_n:
         suggestions.extend(
-            relaxation_suggestions(evaluations, constraints, top_n - len(meeting_chosen), require_keyword)
+            relaxation_suggestions(evaluations, constraints, top_n - len(meeting_chosen), require_keyword, require_taste)
         )
 
     bodies = [candidate_body(e, constraints) for e in chosen]
@@ -621,7 +751,27 @@ def search(db: Session, constraints: dict, top_n: int) -> tuple[list[dict], list
         missing = ", ".join(constraints["menu_keywords"])
         for body in bodies:
             body["reasons"].append(f"요청한 '{missing}' 메뉴는 조건에 맞는 것이 없어 비슷한 가게를 골랐습니다.")
+    if tastes and not require_taste:
+        for body in bodies:
+            body["reasons"].append(f"조건에 맞는 {taste_labels(tastes)} 메뉴가 없어 비슷한 가게를 골랐습니다.")
     return bodies, suggestions
+
+
+def taste_suggestion(constraints: dict) -> dict:
+    """원하는 맛 메뉴를 담을 수 있는 가게가 없을 때. 맛을 하나로 줄이거나 다른 조건을 풀어 보라고 알린다."""
+    tastes = constraints["taste_preferences"]
+    labels = taste_labels(tastes)
+    if len(tastes) > 1:
+        message = f"'{labels}'을 모두 만족하는 메뉴를 찾지 못했어요. 맛을 하나만 골라 보세요."
+    else:
+        message = f"조건에 맞는 {labels} 메뉴를 찾지 못했어요. 음식 종류·예산을 바꾸거나 맛 조건을 빼 보세요."
+    return {
+        "slot": "taste_preferences",
+        "current_value": tastes,
+        "suggested_value": [],
+        "additional_candidates": 0,
+        "message": message,
+    }
 
 
 def keyword_suggestions(restaurants: list[Restaurant], menus_by_restaurant: dict[str, list[Menu]],

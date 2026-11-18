@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.discovery.settings import get_settings
 from app.modules.discovery.timeutil import now_kst
-from app.modules.discovery.constants import CUISINES
+from app.modules.discovery.constants import CUISINES, TASTE_ORDER
 from app.modules.discovery.models import LlmCall
 from app.modules.discovery.schemas import LlmExtraction
 
@@ -26,10 +26,14 @@ EXTRACT_SYSTEM_PROMPT = """너는 배달 주문 문장에서 조건을 뽑는 �
 - people: 먹는 사람 수(정수). '둘이서' → 2, '혼자' → 1. 말하지 않았으면 null.
 - cuisine: 아래 목록 중 하나 또는 null. 목록: {cuisines}
 - excluded_ingredients: 빼 달라는 재료 단어 목록 (예: ["땅콩", "오이"]). 없으면 [].
-- max_spice_level: 0=안 매움, 1=덜 매움, 2=보통, 3=아주 매움. '안 매운' → 0. 말하지 않았으면 null.
+- max_spice_level: 맵기 '상한'. 0=안 매움, 1=덜 매움, 2=보통, 3=아주 매움. '안 매운' → 0, '덜 매운' → 1.
+  매운 걸 원할 때('매운 음식')는 상한이 아니므로 null로 두고 taste_preferences에 SPICY를 넣는다. 말하지 않았으면 null.
 - local_currency_only: 지역화폐로만 결제하겠다고 하면 true, 아니면 false.
 - max_delivery_minutes: 'N분 안에' → N. '빨리'만 있으면 40. 말하지 않았으면 null.
 - menu_keywords: 문장에 나온 구체적인 메뉴 이름 (예: ["짜장면"]). 없으면 [].
+- taste_preferences: 메뉴 이름 대신 맛으로 말한 것. 아래 코드만 쓴다. 없으면 [].
+  SPICY=매운·매콤·얼큰, SWEET=달달·달콤·디저트, SOUP=국물·뜨끈·해장, CRISPY=바삭·튀긴,
+  LIGHT=담백·가벼운·건강, CHEESY=고소·꾸덕·느끼. '느끼한 건 싫어'처럼 싫다고 한 맛은 넣지 않는다.
 문장에 없는 값은 추측하지 말고 null로 둔다."""
 
 EXTRACT_JSON_SCHEMA = {
@@ -43,10 +47,11 @@ EXTRACT_JSON_SCHEMA = {
         "local_currency_only": {"type": "boolean"},
         "max_delivery_minutes": {"type": ["integer", "null"]},
         "menu_keywords": {"type": "array", "items": {"type": "string"}},
+        "taste_preferences": {"type": "array", "items": {"type": "string", "enum": TASTE_ORDER}},
     },
     "required": [
         "budget_krw", "people", "cuisine", "excluded_ingredients",
-        "max_spice_level", "local_currency_only", "max_delivery_minutes", "menu_keywords",
+        "max_spice_level", "local_currency_only", "max_delivery_minutes", "menu_keywords", "taste_preferences",
     ],
 }
 

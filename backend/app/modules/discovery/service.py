@@ -26,9 +26,17 @@ from app.modules.discovery.constants import (
     SOURCE_RULE,
     SOURCE_USER,
 )
-from app.modules.discovery.extractor import extract_by_rules, normalize_cuisine
+from app.modules.discovery.extractor import (
+    extract_by_rules,
+    grounded_cuisine,
+    grounded_exclusions,
+    grounded_menu_keywords,
+    grounded_tastes,
+    has_hint,
+    normalize_cuisine,
+)
 from app.modules.discovery.models import Candidate, ConstraintsHistory, DiscoveryRequest
-from app.modules.discovery.schemas import Constraints, ConstraintsPatch, CreateRequestBody, LlmExtraction
+from app.modules.discovery.schemas import Constraints, ConstraintsPatch, CreateRequestBody, LlmExtraction, ordered_tastes
 from app.modules.discovery.search import search
 
 MESSAGE_MAX_LENGTH = 300
@@ -36,7 +44,8 @@ NO_CANDIDATES = "NO_CANDIDATES"  # A-05 응답 전용 상태: 추천할 가게�
 
 # 응답에서 normalization_notes를 내보낼 순서
 NOTE_ORDER = [
-    "people", "budget_krw", "cuisine", "max_delivery_minutes", "max_spice_level", "payment_requirements",
+    "people", "budget_krw", "cuisine", "taste_preferences", "max_delivery_minutes", "max_spice_level",
+    "payment_requirements",
 ]
 
 
@@ -144,23 +153,46 @@ def _clean_words(values: list[str] | None) -> list[str]:
 
 # ---------------------------------------------------------------- A-01 조건 추출
 
-def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction | None) -> tuple[dict, dict, str]:
-    """LLM 결과를 우선 쓰고, LLM이 비워 둔 항목은 규칙 결과로 채운다."""
+def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction | None,
+           message: str) -> tuple[dict, dict, str]:
+    """규칙 결과를 먼저 쓰고, 규칙이 비워 둔 항목만 LLM 결과로 채운다.
+
+    규칙은 문장에서 실제로 찾은 표현으로만 값을 정하므로, 둘 다 값이 있으면 규칙을 믿는다.
+    LLM 값은 문장에 근거 단어가 있을 때만 받는다 (예: '만오천원'을 5000으로 읽거나,
+    '국물'만 말했는데 음식 종류 '분식'·메뉴 '국물'을 지어내는 경우를 막는다).
+    """
     if extraction is None:
         return rule_constraints, dict(rule_notes), SOURCE_RULE
 
-    merged = {}
+    merged = dict(rule_constraints)
+
+    # 숫자 조건: 규칙이 못 찾았고, 문장에 그 조건의 근거 단어가 있을 때만 LLM 값
     for key in ("budget_krw", "people", "max_spice_level", "max_delivery_minutes"):
         llm_value = getattr(extraction, key)
-        merged[key] = llm_value if llm_value is not None else rule_constraints[key]
+        if merged[key] is None and llm_value is not None and has_hint(key, message):
+            merged[key] = llm_value
 
-    merged["cuisine"] = normalize_cuisine(extraction.cuisine) or rule_constraints["cuisine"]
-    merged["excluded_ingredients"] = _clean_words(extraction.excluded_ingredients + rule_constraints["excluded_ingredients"])
-    merged["menu_keywords"] = _clean_words(extraction.menu_keywords + rule_constraints["menu_keywords"])
-    local_only = extraction.local_currency_only or rule_constraints["payment_requirements"]["local_currency_only"]
+    # 범위를 좁히는 조건: 문장에 그대로 나온 것만 더한다
+    if merged["cuisine"] is None:
+        merged["cuisine"] = grounded_cuisine(message, extraction.cuisine)
+    merged["excluded_ingredients"] = _clean_words(
+        rule_constraints["excluded_ingredients"] + grounded_exclusions(message, extraction.excluded_ingredients)
+    )
+    merged["menu_keywords"] = _clean_words(
+        rule_constraints["menu_keywords"] + grounded_menu_keywords(message, extraction.menu_keywords)
+    )
+    local_only = rule_constraints["payment_requirements"]["local_currency_only"]
+    if extraction.local_currency_only and has_hint("local_currency_only", message):
+        local_only = True
     merged["payment_requirements"] = {"local_currency_only": local_only}
 
-    # 규칙 메모는 최종 값이 규칙 결과와 같을 때만 남긴다 (LLM이 다르게 해석했으면 맞지 않는 메모라서)
+    tastes = ordered_tastes(rule_constraints["taste_preferences"] + grounded_tastes(message, extraction.taste_preferences))
+    # 맵기 상한이 1 이하('안 매운'·'덜 매운')인데 SPICY가 들어오면 뺀다
+    if merged["max_spice_level"] is not None and merged["max_spice_level"] <= 1 and "SPICY" in tastes:
+        tastes.remove("SPICY")
+    merged["taste_preferences"] = tastes
+
+    # 규칙 메모는 최종 값이 규칙 결과와 같을 때만 남긴다
     notes = {}
     for key, note in rule_notes.items():
         if merged.get(key) == rule_constraints.get(key):
@@ -181,7 +213,7 @@ def create_request(db: Session, body: CreateRequestBody) -> dict:
 
     rule_constraints, rule_notes = extract_by_rules(message)
     extraction = llm.extract_conditions(db, body.request_id, message)
-    constraints, notes, source = _merge(rule_constraints, rule_notes, extraction)
+    constraints, notes, source = _merge(rule_constraints, rule_notes, extraction, message)
     constraints["delivery_address"] = body.delivery_address.model_dump()
     constraints = Constraints.model_validate(constraints).model_dump()
 
@@ -258,6 +290,9 @@ def _patched_value(field_name: str, patch: ConstraintsPatch):
 
     if field_name in ("excluded_ingredients", "menu_keywords"):
         return _clean_words(value)
+
+    if field_name == "taste_preferences":
+        return ordered_tastes(value)
 
     if field_name == "payment_requirements":
         if value is None:

@@ -1,8 +1,9 @@
 """O가 쓸 A·B·C·D·E를 고르는 곳 (조립).
 
 지금 (MVP 1 개발 중)
-- A·B: 진짜 모듈 (app/modules/discovery·ordering의 facade). USE_FAKE_A=1 / USE_FAKE_B=1이면 가짜로 되돌린다.
-  가짜 B는 가짜 A의 식당(STORE101…), 진짜 B는 진짜 A의 식당(요기요 수집 데이터)을 쓰므로 짝을 맞춰 쓴다.
+- A·B: 진짜 모듈 (app/modules/discovery·ordering의 facade).
+  USE_FAKE_A=1 / USE_FAKE_B=1이면 가짜로 되돌린다.
+  가짜 B는 가짜 A의 식당(STORE101…), 진짜 B는 진짜 A의 식당을 쓰므로 짝을 맞춰 쓴다.
 - C: 진짜 모듈 (app/modules/benefit/facade.py). USE_FAKE_C=1이면 가짜 C로 되돌린다.
 - D: 진짜 모듈. D가 혜택을 다시 확인할 때(C-05·C-02)도 같은 C를 쓴다 → 금액 기준이 하나.
 - E: E_PAYMENT_URL이 있으면 HTTP(진짜 E 또는 scripts/fake_e_server.py),
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import now as clock_now
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.core.errors import AppError
 from app.fakes import FakeWorld
 from app.fakes.scenario import split_tags
 from app.modules.benefit import facade as benefit_facade
@@ -24,15 +26,14 @@ from app.modules.delegation import DelegationService
 from app.modules.delegation.benefits import CBenefitPort
 from app.modules.delegation.schemas import AuthorizationCheckRequest
 from app.modules.discovery.facade import DiscoveryFacade
-from app.modules.orchestrator.ports import HttpPaymentPort, PaymentPort
+from app.modules.orchestrator.ports import HttpPaymentPort, PaymentPort, PaymentResponseLost
 from app.modules.orchestrator.service import OrchestratorService
-from app.core.errors import AppError
 from app.modules.ordering import config as ordering_config
 from app.modules.ordering import ports as ordering_ports
 from app.modules.ordering.facade import OrderingFacade
 
 _world: FakeWorld | None = None
-_http_payment: HttpPaymentPort | None = None
+_http_payment: PaymentPort | None = None
 
 
 class _RealBenefit:
@@ -78,7 +79,8 @@ def _check_authorization(body: dict, request_id: str) -> dict:  # E → D-06
 class _WithScenarioTags:
     """진짜 A 앞에서 주문 문장의 #태그(#결제거절 등)를 떼어 시나리오 장부에 적는다.
 
-    가짜 E가 장부를 보고 결제 거절·미확정 등을 흉내 내므로, 진짜 A·B·C로도 결제 시나리오를 볼 수 있다.
+    가짜 E가 장부를 보고 결제 거절·미확정 등을 흉내 낸다.
+    진짜 A·B·C로도 결제 시나리오를 볼 수 있다.
     (#품절·#B08장애 같은 B 관련 태그는 가짜 B일 때만 효과가 있다. 진짜 A는 태그를 모른다.)
     """
 
@@ -94,10 +96,32 @@ class _WithScenarioTags:
         return getattr(self._inner, name)
 
 
+class _ScenarioHttpPayment:
+    """시연 모드에서만 주문별 태그를 별도 E의 모의 결과 헤더로 전달한다."""
+
+    def __init__(self, inner: HttpPaymentPort, book):
+        self.inner, self.book = inner, book
+
+    def request_payment(self, body: dict) -> dict:
+        request_id = body["request_id"]
+        outcome = next(
+            (value for flag, value in (("PAY_DECLINE", "DECLINE"), ("PAY_UNKNOWN", "UNKNOWN"))
+             if self.book.has(request_id, flag)),
+            None,
+        )
+        result = self.inner.request_payment(body, mock_outcome=outcome)
+        if self.book.consume(request_id, "PAY_LOST"):
+            raise PaymentResponseLost("시연용 E-01 응답 유실")
+        return result
+
+    def get_by_execution(self, execution_id: str) -> dict:
+        return self.inner.get_by_execution(execution_id)
+
+
 class _BenefitForB:
     """B → C-05. 진짜·가짜 C의 calculate(dict)를 B의 포트 모양으로 감싼다.
 
-    C가 4xx로 거절하면 DependencyRejected(B가 업무 규칙으로 판단), 그 밖의 실패는 DependencyUnavailable(503).
+    C가 4xx로 거절하면 DependencyRejected, 그 밖의 실패는 DependencyUnavailable(503).
     """
 
     def __init__(self, calculate):
@@ -164,7 +188,9 @@ def payment_port() -> PaymentPort:
     global _http_payment
     if settings.e_payment_url:
         if _http_payment is None:
-            _http_payment = HttpPaymentPort(settings.e_payment_url, settings.service_token)
+            http = HttpPaymentPort(settings.e_payment_url, settings.service_token)
+            demo = os.getenv("O_DEMO_E_OVERRIDE", "").lower() in ("1", "true")
+            _http_payment = _ScenarioHttpPayment(http, world().book) if demo else http
         return _http_payment
     return world().payment
 
@@ -180,3 +206,10 @@ def orchestrator_service(session: Session, d_session: Session) -> OrchestratorSe
         delegation=delegation_service(d_session),
         retry_delay=settings.orchestrator_retry_delay,
     )
+
+
+def cart_service(session: Session):
+    """요기요 장바구니 담기 (YOGIYO_CART_MODE: fake 기본 | real | off)."""
+    from app.modules.cart.service import CartService
+
+    return CartService(session, SessionLocal)
