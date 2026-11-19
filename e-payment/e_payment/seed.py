@@ -8,7 +8,9 @@ from e_payment.models import PaymentMethod
 
 SEED = [
     ("CARD001", "U001", "PRD-CARD-A", "CARD", "가상카드 A", None, 350000),
-    ("CARD002", "U001", "PRD-CARD-B", "CARD", "가상카드 B", None, 120000),
+    # 가상카드 B: 혜택 조건(당월 실적 50만원 이상)을 채우도록 실적을 올려 결제수단으로 고를 수 있게 함
+    ("CARD002", "U001", "PRD-CARD-B", "CARD", "가상카드 B", None, 550000),
+    ("CARD003", "U001", "PRD-CARD-C", "CARD", "가상카드 C", None, 200000),
     ("LOCAL001", "U001", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", 120000, None),
     ("CARD101", "U002", "PRD-CARD-A", "CARD", "가상카드 A", None, 100000),
     ("LOCAL101", "U002", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", 1000, None),

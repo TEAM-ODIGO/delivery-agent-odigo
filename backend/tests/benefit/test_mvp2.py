@@ -114,7 +114,7 @@ def test_c10_초안은_DRAFT이고_계산에_쓰이지_않는다(client, admin, 
     assert d["llm"] == {"route": "LLM_API", "model": "fake"}
     rec = client.post("/benefit/recommendations", json=REC, headers=svc).json()
     assert rec["options"][0]["instant_discount_krw"] == 2000            # 기존 ACTIVE 규칙 그대로
-    assert client.get("/benefit/rules", headers=admin).json()["count"] == 3
+    assert client.get("/benefit/rules", headers=admin).json()["count"] == 4  # 카드 A·B·C + 지역화폐 규칙
 
 
 def test_c10_혜택을_못_찾으면_422(client, admin):
