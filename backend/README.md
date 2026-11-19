@@ -66,9 +66,10 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 - `GET /orchestrator/runs/{request_id}/yogiyo-cart` (O-14): 최근 작업. `QUEUED`·`RUNNING` → `CART_READY`(견적과 같음) / `CART_MISMATCH`(다름, `mismatches`) / `FAILED`(`error`). 없으면 `{"status": "NONE"}`.
 - 모드는 `.env`의 `YOGIYO_CART_MODE`로 고른다 (`.env.example` 참고).
   - `fake`(기본): Playwright 없이 견적대로 담긴 것처럼 응답. 주문 문장에 `#요기요불일치`·`#요기요실패`를 넣으면 그 결과를 시연한다.
-  - `real`: 진짜 요기요를 연다. 준비: `uv sync --extra yogiyo` → `uv run playwright install chromium`. 시연할 때는 `YOGIYO_CART_HEADLESS=0`: 요기요 창이 뜨고, 새 주문을 시작할 때까지 열려 있다 (`YOGIYO_CART_KEEP_BROWSER=1`, 기본). 다시 담기를 누르면 창을 새로 열어 처음부터 담는다.
+  - `real`: 진짜 요기요를 연다. 따로 설치할 것은 없다: Playwright는 `uv sync`로 설치되고, 크로미움 브라우저는 첫 담기 때 자동으로 받는다 (처음 한 번 1~2분). 설치된 Chrome을 쓰려면 `YOGIYO_CART_BROWSER=chrome`. 요기요 창이 뜨고(`YOGIYO_CART_HEADLESS=0`, 기본), 새 주문을 시작할 때까지 열려 있다 (`YOGIYO_CART_KEEP_BROWSER=1`, 기본). 다시 담기를 누르면 창을 새로 열어 처음부터 담는다.
   - `off`: 버튼을 누르면 503 `CART_DISABLED`.
-- 서버 없이 Playwright만 확인: `uv run python scripts/yogiyo_cart_try.py --headed` (`--check-only`는 식당 페이지가 열리는지만).
+- 창 없는(headless) 브라우저는 요기요가 "Access Denied"로 막는다. 그래서 창을 띄우는 모드만 쓰고, 막히면 그 이유를 실패 사유로 알려 준다 (우회하지 않음).
+- 서버 없이 Playwright만 확인: `uv run python scripts/yogiyo_cart_try.py --find-open` (지금 열린 식당을 찾아 담기). 식당을 정하려면 `--restaurant`·`--item`, 열리는지만 보려면 `--check-only`.
 - 지금 요기요 주문을 받지 않는 가게("요기요 서비스가 제공되지 않습니다")는 바로 실패로 알려 준다.
 - 담긴 장바구니 원본은 캡처 옆 `{작업id}-cart.json`에 남는다 (요기요 형식이 바뀌었을 때 확인용).
 - 요기요 장바구니는 그 브라우저 탭 안에만 있다. 창을 닫으면 사라지므로 화면에는 캡처로 남긴다.
