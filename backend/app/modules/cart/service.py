@@ -7,7 +7,7 @@
 
 설정 (.env)
 - YOGIYO_CART_MODE   : fake(기본, Playwright 없이 견적대로 담긴 것처럼) | real(진짜 요기요) | off
-- YOGIYO_CART_HEADLESS: 1(기본, 창 없이) | 0(브라우저 창을 띄움, 시연용)
+- YOGIYO_CART_HEADLESS: 0(기본, 브라우저 창을 띄움) | 1(창 없이 — 요기요가 Access Denied로 막음)
 - YOGIYO_CART_KEEP_BROWSER: 1(기본) 창을 띄운 경우 새 주문(O-01) 전까지 요기요 창을 둔다
                           0이면 YOGIYO_CART_KEEP_OPEN_SECONDS(초)만큼 열어 둔 뒤 닫는다
 - YOGIYO_CART_BROWSER: 비우면 Playwright Chromium, chrome이면 설치된 Chrome
@@ -57,7 +57,7 @@ def _seconds(name: str) -> float:
 class CartSettings:
     mode: str = field(default_factory=lambda: _env("YOGIYO_CART_MODE", "fake").lower())
     headless: bool = field(
-        default_factory=lambda: _env("YOGIYO_CART_HEADLESS", "1") not in ("0", "false")
+        default_factory=lambda: _env("YOGIYO_CART_HEADLESS", "0") not in ("0", "false")
     )
     keep_open_seconds: float = field(
         default_factory=lambda: _seconds("YOGIYO_CART_KEEP_OPEN_SECONDS")

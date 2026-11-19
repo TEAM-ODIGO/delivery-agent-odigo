@@ -253,7 +253,7 @@ def test_settings_treat_blank_env_as_default(monkeypatch):
     cfg = CartSettings()
     assert (cfg.mode, cfg.headless, cfg.keep_browser, cfg.keep_open_seconds, cfg.out_dir) == (
         "fake",
-        True,
+        False,  # 창 없는 모드는 요기요가 막아서 창을 띄우는 것이 기본
         True,
         0.0,
         "cart_runs",
@@ -311,3 +311,64 @@ def test_other_user_approve_still_404(env, client):
         headers=OTHER,
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------- 크로미움 자동 설치
+class _FakeChromium:
+    def __init__(self, fails):
+        self.fails = list(fails)
+        self.calls = 0
+
+    async def launch(self, **kw):
+        self.calls += 1
+        if self.fails:
+            raise self.fails.pop(0)
+        return "browser"
+
+
+class _FakePw:
+    def __init__(self, fails):
+        self.chromium = _FakeChromium(fails)
+
+
+def test_launch_installs_chromium_when_missing(monkeypatch):
+    import asyncio
+
+    from app.modules.cart import yogiyo
+
+    installed = []
+    monkeypatch.setattr(yogiyo, "install_chromium", lambda: installed.append(1))
+    pw = _FakePw([Exception("BrowserType.launch: Executable doesn't exist at /x/chrome")])
+    assert asyncio.run(yogiyo._launch(pw, headless=True, channel=None)) == "browser"
+    assert installed == [1] and pw.chromium.calls == 2
+
+
+def test_launch_does_not_install_for_other_errors_or_chrome_channel(monkeypatch):
+    import asyncio
+
+    from app.modules.cart import yogiyo
+
+    monkeypatch.setattr(yogiyo, "install_chromium", lambda: pytest.fail("설치하면 안 됨"))
+    with pytest.raises(Exception, match="boom"):
+        asyncio.run(yogiyo._launch(_FakePw([Exception("boom")]), headless=True, channel=None))
+    missing = Exception("Executable doesn't exist")
+    with pytest.raises(Exception, match="Executable"):
+        asyncio.run(yogiyo._launch(_FakePw([missing]), headless=True, channel="chrome"))
+
+
+def test_install_failure_message_is_readable(monkeypatch):
+    import subprocess
+
+    from app.modules.cart import yogiyo
+
+    def fail(*a, **k):
+        raise subprocess.CalledProcessError(
+            1,
+            a[0],
+            stderr="Downloading...\nError: network unreachable\n    at handleError (x.js:1)",
+        )
+
+    monkeypatch.setattr(yogiyo.subprocess, "run", fail)
+    with pytest.raises(RuntimeError, match="크로미움 자동 설치 실패.*network unreachable") as e:
+        yogiyo.install_chromium()
+    assert "handleError" not in str(e.value)

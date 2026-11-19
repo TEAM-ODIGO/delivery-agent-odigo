@@ -10,11 +10,7 @@ dependencies = [
     "uvicorn",
     "httpx",
     "psycopg[binary]>=3,<4",
-]
-
-[project.optional-dependencies]
-yogiyo = [
-    "playwright>=1.65.2",
+    "playwright>=1.65.2",  # 요기요 장바구니 담기 (브라우저는 첫 담기 때 자동 설치)
 ]
 
 [dependency-groups]

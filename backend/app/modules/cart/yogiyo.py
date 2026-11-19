@@ -1,8 +1,8 @@
 """요기요 장바구니 담기 — 진짜 구현 (Playwright). 결제 직전(장바구니)에서 멈춘다.
 주문하기·결제는 절대 누르지 않는다. 주문·결제 화면으로 넘어가면 즉시 중단한다 (_guard).
 
-Playwright는 선택 설치다: uv sync --extra yogiyo (+ 브라우저: uv run playwright install chromium,
-또는 설치된 Chrome을 쓰려면 YOGIYO_CART_BROWSER=chrome).
+Playwright는 기본 의존성이라 uv sync로 설치된다. 크로미움 브라우저가 없으면 첫 담기 때
+자동으로 받는다 (_launch, 1~2분). 설치된 Chrome을 쓰려면 YOGIYO_CART_BROWSER=chrome.
 
 1일차 확인 결과 (2026-11-16, 내장 브라우저로 실측)
 - 주소: sessionStorage 'ngStorage-location' 하나에 통째로 저장 → 페이지 스크립트보다 먼저 넣으면
@@ -25,9 +25,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
+import subprocess
+import sys
+import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+log = logging.getLogger("app.cart")
 
 BASE = "https://www.yogiyo.co.kr/mobile/#/"
 DEMO_LOCATION = Path(__file__).with_name("demo_location.json")  # 서울시청 (공공 주소)
@@ -48,6 +54,12 @@ _OPTION_STATE = """() => [...document.querySelectorAll('input[id^="sm_"]')]
   .map(i => ({id: i.id, type: i.type, checked: i.checked}))"""
 _READ_CART = """() => JSON.parse(sessionStorage.getItem('ngStorage-cart') || '{}')"""
 _CART_TEXT = """() => (document.querySelector('.cart') || {innerText: ''}).innerText"""
+# 요기요 앞단 보안(Akamai)이 창 없는(headless) 브라우저를 막을 때 나오는 화면. 우회하지 않는다.
+_ACCESS_DENIED = """() => /Access Denied/i.test(document.title + ' ' + document.body.innerText)"""
+BLOCKED_MESSAGE = (
+    "요기요가 접속을 막았어요 (Access Denied). 창 없는(headless) 브라우저는 막히니 "
+    "YOGIYO_CART_HEADLESS=0 (창을 띄우는 모드)으로 실행해 주세요."
+)
 _NOT_SERVING = """() => /요기요\\s*서비스가\\s*제공되지/.test(document.body.innerText)"""
 _VISIBLE_MODAL_TEXT = """() => [...document.querySelectorAll('.modal')]
   .filter(m => m.offsetParent !== null || getComputedStyle(m).display === 'block')
@@ -109,10 +121,52 @@ def _won(text: str, label: str) -> int | None:
     return int(m.group(1).replace(",", "")) if m else None
 
 
+# ---------------------------------------------------------------- 브라우저 실행 (없으면 자동 설치)
+_install_lock = threading.Lock()
+
+
+def _browser_missing(exc: Exception) -> bool:
+    msg = str(exc)
+    return "Executable doesn't exist" in msg or "playwright install" in msg
+
+
+def install_chromium() -> None:
+    """Playwright용 크로미움을 받는다 (처음 한 번, 1~2분). 이미 있으면 바로 끝난다."""
+    with _install_lock:
+        log.warning("Playwright 크로미움이 없어 자동 설치합니다 (처음 한 번, 1~2분)")
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            out = f"{getattr(exc, 'stderr', None) or ''}\n{getattr(exc, 'output', None) or ''}"
+            errors = [ln.strip() for ln in out.splitlines() if ln.strip().startswith("Error")]
+            detail = (errors[0] if errors else (out.strip() or str(exc)))[:300]
+            raise RuntimeError(
+                "크로미움 자동 설치 실패 (네트워크를 확인하거나 "
+                f"YOGIYO_CART_BROWSER=chrome 으로 설치된 Chrome 사용): {detail}"
+            ) from exc
+
+
+async def _launch(pw, *, headless: bool, channel: str | None):
+    """브라우저를 띄운다. Playwright 크로미움이 없으면 받아서 한 번 더 시도한다."""
+    try:
+        return await pw.chromium.launch(headless=headless, channel=channel)
+    except Exception as exc:
+        if channel or not _browser_missing(exc):
+            raise  # 설치된 Chrome(channel)이 없거나 다른 오류면 그대로 알린다
+    await asyncio.to_thread(install_chromium)
+    return await pw.chromium.launch(headless=headless, channel=channel)
+
+
 async def fill_cart(
     order: CartOrder,
     *,
-    headless: bool = True,
+    headless: bool = False,
     out_dir: str | Path = "cart_runs",
     timeout_ms: int = 20000,
     check_only: bool = False,
@@ -131,7 +185,7 @@ async def fill_cart(
 
     async with async_playwright() as p:
         # browser_channel='chrome': 설치된 Chrome 사용 (playwright install 없이)
-        browser = await p.chromium.launch(headless=headless, channel=browser_channel)
+        browser = await _launch(p, headless=headless, channel=browser_channel)
         try:
             context = await _new_context(browser, order)
             result = await _fill(
@@ -177,7 +231,12 @@ async def _fill(
     page.on("dialog", lambda d: asyncio.ensure_future(d.dismiss()))
     try:
         await page.goto(f"{base_url}{order.restaurant_id}/", wait_until="domcontentloaded")
-        await page.wait_for_function(f"({_COUNT_MENUS})() > 0", timeout=timeout_ms)
+        try:
+            await page.wait_for_function(f"({_COUNT_MENUS})() > 0", timeout=timeout_ms)
+        except Exception:
+            if await page.evaluate(_ACCESS_DENIED):
+                raise RuntimeError(BLOCKED_MESSAGE) from None
+            raise
         result.url = page.url
         if f"/{order.restaurant_id}/" not in page.url:
             raise RuntimeError(f"식당 페이지가 아니라 {page.url} 로 이동함 (주소 설정 실패?)")
@@ -343,7 +402,7 @@ class BrowserKeeper:
         from playwright.async_api import async_playwright
 
         self.pw = await async_playwright().start()
-        self.browser = await self.pw.chromium.launch(headless=headless, channel=channel)
+        self.browser = await _launch(self.pw, headless=headless, channel=channel)
         return self.browser
 
     async def _close_context(self) -> None:
