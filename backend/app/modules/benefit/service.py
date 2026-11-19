@@ -109,6 +109,37 @@ def recommend_payment_methods(req: RecommendRequest, idempotency_key: str | None
     return result
 
 
+# ---------- 최소주문금액 사전 확인 (로컬 확장, 명세 밖) ----------
+def check_min_order(
+    user_id: str, request_id: str | None, orders: list[dict],
+    payment_method_ids: list[str] | None = None, local_currency_only: bool = False,
+) -> dict:
+    """후보 주문마다 '주문 금액이 모자라 결제수단을 못 쓰는지' 확인한다. 상태를 바꾸지 않는다.
+
+    orders: [{"restaurant_id", "order_krw"}] (order_krw = 메뉴 합계 + 배달비)
+    결과 required_order_krw: 못 쓰는 경우 필요한 최소주문금액, 쓸 수 있거나 다른 사유면 None.
+    """
+    methods = get_ledger().get_payment_methods(user_id, request_id)
+    if payment_method_ids:
+        methods = [m for m in methods if m.payment_method_id in payment_method_ids]
+    _, rules = rules_by_product()
+    results = []
+    for o in orders:
+        required = None
+        try:
+            restaurant = get_restaurant(o["restaurant_id"])
+        except AppError:  # 모르는 식당은 판단하지 않는다 (이후 단계가 그대로 검증)
+            restaurant = None
+        if restaurant is not None:
+            required = domain.min_order_shortfall(
+                methods, rules, o["order_krw"], restaurant,
+                seed.BENEFIT_USED_KRW, local_currency_only,
+            )
+        results.append({"restaurant_id": o["restaurant_id"], "order_krw": o["order_krw"],
+                        "required_order_krw": required})
+    return {"results": results}
+
+
 # ---------- C-04 추천 결과 조회 ----------
 def view_recommendation(recommendation_id: str) -> dict:
     rec = _recommendations.get(recommendation_id)

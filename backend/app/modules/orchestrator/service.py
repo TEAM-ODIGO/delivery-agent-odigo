@@ -70,6 +70,10 @@ CATALOG_VERSION = "CAT-V1"
 TRANSIENT = (TimeoutError, ConnectionError, httpx.TransportError)
 
 
+# 최소주문금액 미달 후보에 보여 주는 문구 (로컬 확장)
+MIN_ORDER_MESSAGE = "최소주문금액이 맞지 않아서 주문이 불가합니다"
+
+
 class DependencyFailed(Exception):
     """하위 모듈이 재시도 후에도 응답하지 않음 → 503 DEPENDENCY_UNAVAILABLE."""
 
@@ -411,6 +415,16 @@ class OrchestratorService:
     def _on_select_candidate(self, run: Run, p: dict) -> None:
         ctx = run.context
         cand = self._candidate_at(run, p["candidate_index"])
+        if cand.get("min_order"):  # 화면이 막아 두지만 서버도 거절한다
+            raise AppError(
+                400,
+                "VALIDATION_ERROR",
+                MIN_ORDER_MESSAGE,
+                {
+                    "fields": [{"loc": "body.candidate_index", "reason": "min_order_not_met"}],
+                    **cand["min_order"],
+                },
+            )
         cid = cand["candidate_id"]
         rid = run.request_id
 
@@ -911,6 +925,7 @@ class OrchestratorService:
 
         found = self._call(run, "A", "A-05", lambda: self.a.search(rid, {"top_n": 3}))
         cands = [{**c, "index": i} for i, c in enumerate(found.get("candidates", []))]
+        cands = self._mark_min_order(run, cands, a["constraints"])
         self._set_ctx(run, candidates=cands, tried_candidate_ids=[])
         if not cands:
             self._to(
@@ -1446,6 +1461,42 @@ class OrchestratorService:
             {"fields": [{"loc": "body.candidate_index", "reason": "not_available"}]},
         )
 
+    def _mark_min_order(self, run: Run, cands: list[dict], constraints: dict) -> list[dict]:
+        """최소주문금액이 모자라 맡긴 결제수단을 쓸 수 없는 후보에 min_order를 붙인다 (로컬 확장).
+
+        B-05는 이런 수단을 거절해 주문이 BLOCKED되므로, 후보 목록에서 미리 막는다.
+        확인하지 못하면(C가 이 확인을 안 하거나 장애) 표시하지 않고 기존 흐름대로 간다.
+        """
+        check = getattr(self.c, "check_min_order", None)
+        if check is None or not cands:
+            return cands
+        body = {
+            "user_id": run.user_id,
+            "request_id": run.request_id,
+            "orders": [
+                {
+                    "restaurant_id": c["restaurant"]["restaurant_id"],
+                    "order_krw": c["estimated_total_krw"],
+                }
+                for c in cands
+            ],
+            "candidate_payment_method_ids": run.delegation.get("allowed_payment_method_ids") or [],
+            "local_currency_only": bool(
+                (constraints.get("payment_requirements") or {}).get("local_currency_only")
+            ),
+        }
+        try:
+            res = self._call(run, "C", "C-MIN-ORDER", lambda: check(body))
+        except (AppError, DependencyFailed):
+            return cands
+        marked = []
+        for c, r in zip(cands, res.get("results", []), strict=False):
+            required = r.get("required_order_krw")
+            if required:
+                c = {**c, "min_order": {"required_krw": required, "order_krw": r["order_krw"]}}
+            marked.append(c)
+        return marked if len(marked) == len(cands) else cands
+
     def _candidate_prompt(self, run: Run) -> dict:
         return {
             "type": "SELECT_CANDIDATE",
@@ -1456,7 +1507,11 @@ class OrchestratorService:
                     "summary": ", ".join(f"{i['name']} {i['quantity']}" for i in c["items"]),
                     "total_krw": c["estimated_total_krw"],
                     "reasons": c.get("reasons", []),
-                    "meets_all_constraints": c.get("meets_all_constraints", True),
+                    "meets_all_constraints": c.get("meets_all_constraints", True)
+                    and not c.get("min_order"),
+                    # 최소주문금액 미달이면 선택할 수 없다 (로컬 확장)
+                    "orderable": not c.get("min_order"),
+                    "min_order": c.get("min_order"),
                     # 화면(와이어프레임 v0.3 03)이 보여 주는 값. A 후보에 있는 것만 그대로 전달한다
                     "restaurant": {
                         k: c["restaurant"].get(k)
@@ -1482,7 +1537,12 @@ class OrchestratorService:
                         if isinstance(v, str)
                         else {"code": v.get("code"), "message": v.get("message")}
                         for v in c.get("violations", [])
-                    ],
+                    ]
+                    + (
+                        [{"code": "MIN_ORDER_NOT_MET", "message": MIN_ORDER_MESSAGE}]
+                        if c.get("min_order")
+                        else []
+                    ),
                 }
                 for c in self._remaining_candidates(run)
             ],

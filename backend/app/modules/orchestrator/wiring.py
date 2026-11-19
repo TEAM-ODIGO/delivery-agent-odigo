@@ -42,6 +42,7 @@ class _RealBenefit:
     recommend = staticmethod(benefit_facade.recommend)
     calculate = staticmethod(benefit_facade.calculate)
     list_methods = staticmethod(benefit_facade.list_payment_methods)
+    check_min_order = staticmethod(benefit_facade.check_min_order)  # 로컬 확장
 
 
 def _d_benefit_port() -> CBenefitPort:

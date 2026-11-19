@@ -141,6 +141,27 @@ def recommend(methods, rules_by_product, order_krw, restaurant, used_by_method=N
     return options, excluded
 
 
+def min_order_shortfall(methods, rules_by_product, order_krw, restaurant,
+                        used_by_method=None, local_currency_only=False) -> int | None:
+    """주문 금액이 모자라 어떤 결제수단도 못 쓰는지 확인한다 (읽기 전용, 추천 기록을 남기지 않는다).
+
+    B-05는 eligible=false인 수단을 거절하므로, 쓸 수 있는 수단이 하나도 없는데
+    최소주문금액만 채우면 쓸 수 있는 수단이 있으면 그 중 가장 낮은 요구 금액을 돌려준다.
+    쓸 수 있는 수단이 있거나, 금액 말고 다른 사유(실적·가맹점 등)로 못 쓰면 None.
+    """
+    used_by_method = used_by_method or {}
+    required = []
+    for m in methods:
+        rule = rules_by_product.get(m.product_id)
+        c = calculate(m, rule, order_krw, restaurant, used_by_method.get(m.payment_method_id, 0),
+                      local_currency_only)
+        if c.eligible:
+            return None
+        if rule is not None and c.reason_codes == ["MIN_ORDER_NOT_MET"]:
+            required.append(rule.min_order_krw)
+    return min(required) if required else None
+
+
 def recommend_split(methods, rules_by_product, order_krw, local_amount_krw, restaurant,
                     used_by_method=None, local_currency_only=False):
     """분할결제(로컬 확장): 지역화폐로 local_amount_krw를 내고, 나머지는 카드로 낼 때의 추천.

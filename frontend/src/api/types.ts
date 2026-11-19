@@ -60,6 +60,9 @@ export interface Candidate {
   };
   items: Item[];
   violations: { code: string; message: string | null }[];
+  // 최소주문금액 미달이면 orderable=false (로컬 확장). min_order에 필요한 금액과 현재 주문 금액이 온다.
+  orderable?: boolean;
+  min_order?: { required_krw: number; order_krw: number } | null;
 }
 
 export interface MethodRef {
