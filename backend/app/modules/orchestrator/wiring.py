@@ -117,6 +117,9 @@ class _ScenarioHttpPayment:
     def get_by_execution(self, execution_id: str) -> dict:
         return self.inner.get_by_execution(execution_id)
 
+    def verify_card_tap(self, body: dict) -> dict:  # NFC 실물 카드 태그 확인 (로컬 확장): 그대로 E에 넘긴다
+        return self.inner.verify_card_tap(body)
+
 
 class _BenefitForB:
     """B → C-05. 진짜·가짜 C의 calculate(dict)를 B의 포트 모양으로 감싼다.

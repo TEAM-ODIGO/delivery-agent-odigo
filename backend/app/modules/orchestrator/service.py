@@ -177,7 +177,8 @@ class OrchestratorService:
             RunEventType.USER_REPLY,
             run.state,
             run.state,
-            detail={k: v for k, v in payload.items() if k != "expected_state_version"},
+            # card_tap(NFC 토큰)은 기록에 남기지 않는다
+            detail={k: v for k, v in payload.items() if k not in ("expected_state_version", "card_tap")},
         )
         handler = {
             ReplyType.CLARIFICATION: self._on_clarification,
@@ -714,6 +715,8 @@ class OrchestratorService:
     def _on_approve(self, run: Run, p: dict) -> None:
         ctx = run.context
         rid = run.request_id
+        if p.get("card_tap") and not ctx.get("execution_id"):
+            self._check_card_tap(run, p["card_tap"])  # 다른 카드면 여기서 멈춘다 (결제 시작 전)
         if not ctx.get("execution_id"):
             try:
                 conf = self._call(
@@ -784,6 +787,8 @@ class OrchestratorService:
             # 명세 공백: B-07 응답의 proposal_hash를 B가 얻을 길이 없음 → O가 D-02 값으로 채움
             "proposal_hash": ei.get("proposal_hash") or ctx["proposal_hash"],
         }
+        if p.get("card_tap"):  # NFC 실물 카드(로컬 확장): E도 결제 직전에 한 번 더 확인한다
+            e01["card_tap"] = p["card_tap"]
         self._set_ctx(run, payment_request=e01)
         self._to(run, RunState.PAYING, prompt=None, service="B", detail={"api": "B-07"})
         self._commit()  # ← 결제 요청 전에 저장: 여기서 멈춰도 reconcile이 E-03으로 이어 받는다
@@ -832,6 +837,17 @@ class OrchestratorService:
                     "reason_codes": [exc.code],
                 }
         self._apply_payment_result(run, res)
+
+    def _check_card_tap(self, run: Run, card_tap: dict) -> None:
+        """NFC 실물 카드(로컬 확장): 고른 가상카드의 실물 카드를 태그했는지 결제 전에 E에 묻는다.
+        다르면 결제를 시작하지 않고 오류를 돌려준다. 주문은 승인 화면에 그대로 있어 다시 태그할 수 있다."""
+        payment_method_id = run.context["target_quote"]["payment_method_id"]
+        body = {"payment_method_id": payment_method_id, "card_tap": card_tap}
+        res = self._call(run, "E", "E-NFC", lambda: self.e.verify_card_tap(body))
+        if not res.get("matched"):
+            code = res.get("reason_code") or "NFC_CARD_MISMATCH"
+            message = res.get("message") or "결제할 수 없는 카드예요. 다시 태그해 주세요."
+            raise AppError(422, code, message, {"payment_method_id": payment_method_id})
 
     def _on_cancel(self, run: Run, p: dict) -> None:
         approval_id = run.context.get("approval_id")

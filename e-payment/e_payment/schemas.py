@@ -11,6 +11,20 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CardTap(_Strict):
+    """휴대폰이 읽은 NFC 카드 정보 (로컬 확장, 팀 합의 전). 둘 중 하나는 있어야 한다.
+    token: 카드 URL의 t 값 (아이폰·안드로이드), serial_number: 카드 일련번호 (안드로이드만)"""
+
+    serial_number: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    token: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if self.serial_number is None and self.token is None:
+            raise ValueError("serial_number나 token 중 하나는 있어야 합니다.")
+        return self
+
+
 class PaymentRequest(_Strict):
     request_id: Id
     user_id: Id
@@ -24,6 +38,8 @@ class PaymentRequest(_Strict):
     # 나머지(charge_krw − 지역화폐 몫)는 payment_method_id(카드)로 낸다. 둘 다 있거나 둘 다 없어야 한다.
     local_currency_payment_method_id: Id | None = None
     local_currency_charge_krw: Annotated[int, Field(gt=0, le=100_000_000, strict=True)] | None = None
+    # NFC 실물 카드 태그(로컬 확장). 결제 카드에 UID가 등록돼 있으면 같은 카드를 태그했는지 확인한다
+    card_tap: CardTap | None = None
 
     @model_validator(mode="after")
     def _split_fields(self):
@@ -35,6 +51,13 @@ class PaymentRequest(_Strict):
         if local_id is not None and local_id == self.payment_method_id:
             raise ValueError("지역화폐와 나머지 결제수단은 달라야 합니다.")
         return self
+
+
+class CardTapCheck(_Strict):
+    """결제 전에 O가 '이 카드로 결제해도 되는지' 미리 묻는 요청 (로컬 확장)."""
+
+    payment_method_id: Id
+    card_tap: CardTap
 
 
 class RefundRequest(_Strict):
