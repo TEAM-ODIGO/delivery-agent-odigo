@@ -1,4 +1,6 @@
-from app.modules.benefit.domain import BenefitRule, PaymentMethod, Restaurant, calculate, recommend
+from app.modules.benefit.domain import (
+    BenefitRule, PaymentMethod, Restaurant, calculate, min_order_shortfall, recommend,
+)
 
 CARD = PaymentMethod("CARD001", "PRD-CARD-A", "CARD", monthly_performance_krw=350000)
 LOCAL = PaymentMethod("LOCAL001", "PRD-LOCAL-A", "LOCAL_CURRENCY", balance_krw=120000)
@@ -79,3 +81,30 @@ def test_동률이면_결제수단_ID순():
     b = PaymentMethod("CARD_A", "PRD-CARD-A", "CARD", monthly_performance_krw=350000)
     options, _ = recommend([a, b], RULES, 35000, OK_SHOP)
     assert ids(options) == ["CARD_A", "CARD_B"]
+
+
+# ---------- 최소주문금액 사전 확인 (로컬 확장) ----------
+def test_최소주문금액_미달이면_필요한_금액을_돌려준다():
+    # 카드만 있고 주문 13,000원 < 카드 혜택 최소주문금액 15,000원 → B-05가 거절하는 주문
+    assert min_order_shortfall([CARD], RULES, 13000, OK_SHOP) == 15000
+
+
+def test_최소주문금액을_채우면_None():
+    assert min_order_shortfall([CARD], RULES, 15000, OK_SHOP) is None
+
+
+def test_쓸_수_있는_수단이_하나라도_있으면_None():
+    # 지역화폐는 최소주문금액이 없어 13,000원도 결제할 수 있다
+    assert min_order_shortfall([CARD, LOCAL], RULES, 13000, OK_SHOP) is None
+
+
+def test_금액이_아닌_사유로_못_쓰면_None():
+    low = PaymentMethod("CARD001", "PRD-CARD-A", "CARD", monthly_performance_krw=100000)
+    # 전월실적 미달은 금액 문제가 아니다
+    assert min_order_shortfall([low], RULES, 13000, OK_SHOP) is None
+    assert min_order_shortfall([], RULES, 13000, OK_SHOP) is None
+
+
+def test_지역화폐_불가_가게는_카드의_최소주문금액이_기준():
+    shop = Restaurant("S", False, False, "ASSUMED_FROM_VOUCHER")
+    assert min_order_shortfall([CARD, LOCAL], RULES, 13000, shop) == 15000

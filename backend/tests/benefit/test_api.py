@@ -236,3 +236,21 @@ def test_명세_예시_응답_형태(client, svc, admin):
         "restaurant_id": "STORE101", "accepts_livelihood_voucher": True, "local_currency_merchant": True,
         "local_currency_basis": "ASSUMED_FROM_VOUCHER", "checked_at": None, "mock": True}
     assert "mock" not in client.get("/benefit/health").json()
+
+
+# ---------- 최소주문금액 사전 확인 (로컬 확장, 명세 밖) ----------
+def test_최소주문금액_사전_확인(client):
+    from app.modules.benefit import facade
+
+    body = {
+        "user_id": "U001", "request_id": "REQ001",
+        "candidate_payment_method_ids": ["CARD001", "LOCAL001"],
+        "orders": [
+            {"restaurant_id": "STORE102", "order_krw": 13000},  # 지역화폐 불가 가게, 카드 최소 15,000원
+            {"restaurant_id": "STORE102", "order_krw": 15000},
+            {"restaurant_id": "STORE101", "order_krw": 13000},  # 지역화폐 가맹 → 결제 가능
+            {"restaurant_id": "NOWHERE", "order_krw": 1000},  # 모르는 식당은 판단하지 않음
+        ],
+    }
+    got = [r["required_order_krw"] for r in facade.check_min_order(body)["results"]]
+    assert got == [15000, None, None, None]
