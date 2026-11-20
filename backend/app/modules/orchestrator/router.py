@@ -147,6 +147,16 @@ def get_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
     return cart.latest(request_id) or {"status": "NONE"}
 
 
+@router.get("/runs/{request_id}/live-check", summary="O-15 후보 요기요 실시간 확인 결과")
+def get_live_check(request_id: str, svc: Service, user_id: UserId):
+    return svc.live_check_view(user_id, request_id)
+
+
+@router.post("/runs/{request_id}/live-check", summary="O-16 후보 요기요 실시간 다시 확인")
+def recheck_live(request_id: str, svc: Service, user_id: UserId):
+    return svc.live_recheck(user_id, request_id)
+
+
 @router.get("/runs/{request_id}", summary="O-03 진행 상태 조회")
 def get_run(request_id: str, svc: Service, user_id: UserId):
     return svc.get_run(user_id, request_id)

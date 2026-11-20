@@ -106,8 +106,11 @@ class _ScenarioHttpPayment:
     def request_payment(self, body: dict) -> dict:
         request_id = body["request_id"]
         outcome = next(
-            (value for flag, value in (("PAY_DECLINE", "DECLINE"), ("PAY_UNKNOWN", "UNKNOWN"))
-             if self.book.has(request_id, flag)),
+            (
+                value
+                for flag, value in (("PAY_DECLINE", "DECLINE"), ("PAY_UNKNOWN", "UNKNOWN"))
+                if self.book.has(request_id, flag)
+            ),
             None,
         )
         result = self.inner.request_payment(body, mock_outcome=outcome)
@@ -118,7 +121,9 @@ class _ScenarioHttpPayment:
     def get_by_execution(self, execution_id: str) -> dict:
         return self.inner.get_by_execution(execution_id)
 
-    def verify_card_tap(self, body: dict) -> dict:  # NFC 실물 카드 태그 확인 (로컬 확장): 그대로 E에 넘긴다
+    def verify_card_tap(
+        self, body: dict
+    ) -> dict:  # NFC 실물 카드 태그 확인 (로컬 확장): 그대로 E에 넘긴다
         return self.inner.verify_card_tap(body)
 
 
@@ -209,7 +214,15 @@ def orchestrator_service(session: Session, d_session: Session) -> OrchestratorSe
         payment=payment_port(),
         delegation=delegation_service(d_session),
         retry_delay=settings.orchestrator_retry_delay,
+        live_check=live_check_service(),
     )
+
+
+def live_check_service():
+    """요기요 실시간 식당 확인 (LIVE_CHECK_MODE: fake 기본 | real | off)."""
+    from app.modules.livecheck.service import LiveCheckService
+
+    return LiveCheckService(SessionLocal)
 
 
 def cart_service(session: Session):
