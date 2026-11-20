@@ -74,6 +74,20 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 - 담긴 장바구니 원본은 캡처 옆 `{작업id}-cart.json`에 남는다 (요기요 형식이 바뀌었을 때 확인용).
 - 요기요 장바구니는 그 브라우저 탭 안에만 있다. 창을 닫으면 사라지므로 화면에는 캡처로 남긴다.
 
+## 요기요 실시간 식당 확인 (O-15 · O-16)
+
+후보를 보여 줄 때(CANDIDATES_READY) 상위 후보가 지금 요기요에서 주문 가능한지 백그라운드로 확인한다.
+장바구니에는 담지 않고 식당 페이지만 읽는다. 후보 화면은 확인을 기다리지 않는다.
+
+- A-05에서 후보를 `LIVE_CHECK_TOP_N`(6)곳 받고, 순위대로 확인하다 통과가 `LIVE_CHECK_WANT`(3)곳이면 멈춘다.
+- 판정: `OK` · `CHANGED`(가격·배달비·최소 주문 금액·메뉴 번호만 다름, 고를 수 있음) · `UNAVAILABLE`(서비스 미제공·메뉴 없음·품절·페이지 안 열림, 고를 수 없음) · `BLOCKED` · `ERROR` · `CHECKING` · `SKIPPED`
+- `GET /orchestrator/runs/{request_id}/live-check` (O-15): 후보별 결과와 진행률. `visible`은 화면에 보일 후보(고를 수 있는 후보가 `WANT`곳 나올 때까지 순위대로), `selectable`은 고를 수 있는지. 주문 불가 후보는 숨기지 않고 사유와 함께 비활성으로 보인다.
+- `POST /orchestrator/runs/{request_id}/live-check` (O-16): 다시 확인 (후보 선택 단계에서만).
+- 후보 선택(O-02 `SELECT_CANDIDATE`)에서 주문 불가로 확인된 후보는 409 `CANDIDATE_UNAVAILABLE`. 확인 중이면 그 식당 확인을 잠깐 기다린다. 판정은 주문 이벤트(O-04)에 `LIVE_CHECKED`로 남는다.
+- 결과는 식당당 한 행(`restaurant_live_status`)에 덮어쓴다. 주문마다 쌓지 않는다.
+- 모드는 `.env`의 `LIVE_CHECK_MODE`로 고른다. `fake`(기본)는 주문 문장 태그 `#요기요닫힘` `#요기요가격변경` `#요기요전부닫힘`으로 시연한다.
+- 서버 없이 확인 도구만 돌리기: `uv run python scripts/yogiyo_cart_try.py --check 20 --want 20`
+
 ## C(혜택)와 함께 확인
 
 ```bash

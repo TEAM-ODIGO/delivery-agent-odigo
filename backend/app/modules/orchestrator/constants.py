@@ -65,6 +65,7 @@ class RunEventType(StrEnum):
     SERVICE_CALL = "SERVICE_CALL"
     SERVICE_ERROR = "SERVICE_ERROR"
     PAYMENT_RESULT = "PAYMENT_RESULT"
+    LIVE_CHECKED = "LIVE_CHECKED"  # 후보 선택 때 본 요기요 실시간 확인 결과
 
 
 class SyncStatus(StrEnum):

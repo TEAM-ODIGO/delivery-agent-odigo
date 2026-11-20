@@ -104,8 +104,12 @@ class OrchestratorService:
         now: Callable[[], datetime] = clock.now,
         retries: int = 2,
         retry_delay: float = 0.0,
+        live_check: Any = None,
     ):
         self.session = session
+        # 요기요 실시간 식당 확인 (app.modules.livecheck). None이면 확인하지 않는다 (기존 흐름)
+        self.live = live_check if live_check is not None and live_check.enabled else None
+        self._after_commit: list[Callable[[], None]] = []
         self.a, self.b, self.c, self.e, self.d = discovery, ordering, benefit, payment, delegation
         self.now = now
         self.retries = retries
@@ -182,7 +186,9 @@ class OrchestratorService:
             run.state,
             run.state,
             # card_tap(NFC 토큰)은 기록에 남기지 않는다
-            detail={k: v for k, v in payload.items() if k not in ("expected_state_version", "card_tap")},
+            detail={
+                k: v for k, v in payload.items() if k not in ("expected_state_version", "card_tap")
+            },
         )
         handler = {
             ReplyType.CLARIFICATION: self._on_clarification,
@@ -427,6 +433,7 @@ class OrchestratorService:
             )
         cid = cand["candidate_id"]
         rid = run.request_id
+        self._check_live(run, cand)
 
         # 예산 초과 확인(로컬 확장): 사용자가 동의했고 A가 이 후보를 예산 초과로
         # 표시했을 때만 기록한다. 동의는 선택할 때마다 새로 정한다
@@ -632,9 +639,13 @@ class OrchestratorService:
         if local_amount:
             option = next(o for o in rec["options"] if o["payment_method_id"] == pm)
             if not option.get("split"):  # C가 분할 추천을 주지 못함 (분할 미지원 C)
-                raise AppError(409, "SPLIT_NOT_AVAILABLE", "지역화폐 분할결제를 쓸 수 없는 상태예요.")
+                raise AppError(
+                    409, "SPLIT_NOT_AVAILABLE", "지역화폐 분할결제를 쓸 수 없는 상태예요."
+                )
             local_pm = option["split"]["local_currency"]["payment_method_id"]
-            b05.update(local_currency_payment_method_id=local_pm, local_currency_amount_krw=local_amount)
+            b05.update(
+                local_currency_payment_method_id=local_pm, local_currency_amount_krw=local_amount
+            )
             b05_key += f":{local_pm}:{local_amount}"
         try:
             bind = self._call(
@@ -923,10 +934,13 @@ class OrchestratorService:
         )
         self._set_ctx(run, policy_id=policy["policy_id"], policy_version=policy["policy_version"])
 
-        found = self._call(run, "A", "A-05", lambda: self.a.search(rid, {"top_n": 3}))
+        top_n = self.live.cfg.top_n if self.live else 3
+        found = self._call(run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n}))
         cands = [{**c, "index": i} for i, c in enumerate(found.get("candidates", []))]
         cands = self._mark_min_order(run, cands, a["constraints"])
         self._set_ctx(run, candidates=cands, tried_candidate_ids=[])
+        if self.live and cands:
+            self._start_live_check(run)
         if not cands:
             self._to(
                 run,
@@ -1287,11 +1301,15 @@ class OrchestratorService:
             self.session.commit()
         except StaleDataError as exc:  # 같은 주문을 다른 요청이 먼저 바꿈
             self.session.rollback()
+            self._after_commit.clear()
             raise AppError(
                 409,
                 "INVALID_STATE_FOR_REPLY",
                 "다른 요청이 먼저 처리됐습니다. 새로 고친 뒤 다시 시도해 주세요.",
             ) from exc
+        callbacks, self._after_commit = self._after_commit, []
+        for fn in callbacks:  # 저장이 끝난 뒤에 할 일 (예: 요기요 실시간 확인 시작)
+            fn()
 
     def _load(self, request_id: str, user_id: str, *, lock: bool = False) -> Run:
         stmt = select(Run).where(Run.request_id == request_id)
@@ -1446,6 +1464,72 @@ class OrchestratorService:
         )
 
     # ================================================================ 화면에 보낼 내용
+    # ---------------------------------------------------------------- 요기요 실시간 확인
+    def _start_live_check(self, run: Run) -> None:
+        """후보 확인을 시작한다. 주문이 저장된 뒤 작업 스레드에 맡긴다 (후보 화면은 안 기다림)."""
+        started = self.now()
+        self._set_ctx(run, live_check={"started_at": started.isoformat()})
+        rid, cands, message = run.request_id, list(run.context["candidates"]), run.message
+        self._after_commit.append(lambda: self.live.start(rid, cands, message, started))
+
+    def _live_started_at(self, run: Run) -> datetime | None:
+        raw = (run.context or {}).get("live_check", {}).get("started_at")
+        return datetime.fromisoformat(raw) if raw else None
+
+    def _check_live(self, run: Run, cand: dict) -> None:
+        """고른 후보가 요기요에서 지금 주문 불가로 확인됐으면 거절한다 (409 CANDIDATE_UNAVAILABLE).
+
+        확인 중이면 그 식당 확인이 끝날 때까지 잠깐 기다린다. 확인하지 못한 후보는 막지 않는다.
+        """
+        if not self.live:
+            return
+        v = self.live.verdict(run.request_id, cand, self._live_started_at(run))
+        self._event(
+            run,
+            RunEventType.LIVE_CHECKED,
+            run.state,
+            run.state,
+            service="LIVE",
+            detail={
+                "candidate_id": cand["candidate_id"],
+                "restaurant_id": v["restaurant_id"],
+                "status": v["status"],
+                "changes": v["changes"],
+                "reason": v["reason"],
+                "checked_at": v["checked_at"],
+            },
+        )
+        if v["status"] == "UNAVAILABLE":
+            raise AppError(
+                409,
+                "CANDIDATE_UNAVAILABLE",
+                "방금 확인해 보니 지금 주문할 수 없는 가게예요. 다른 후보를 골라 주세요.",
+                {"candidate_index": cand["index"], "reason": v["reason"]},
+            )
+
+    def live_check_view(self, user_id: str, request_id: str) -> dict:
+        """O-15. 후보별 요기요 실시간 확인 결과 (화면이 진행 중에 폴링)."""
+        run = self._load(request_id, user_id)
+        if not self.live:
+            return {"mode": "off", "state": "OFF", "total": 0, "done": 0, "results": []}
+        cands = self._remaining_candidates(run) if run.context else []
+        return self.live.view(run.request_id, cands, self._live_started_at(run))
+
+    def live_recheck(self, user_id: str, request_id: str) -> dict:
+        """O-16. 후보를 다시 확인한다 (real 모드 캐시 무시). 후보 선택 단계에서만."""
+        run = self._load(request_id, user_id, lock=True)
+        if not self.live:
+            raise AppError(503, "LIVE_CHECK_DISABLED", "요기요 실시간 확인이 꺼져 있습니다.")
+        if run.state != RunState.CANDIDATES_READY:
+            raise AppError(
+                409, "INVALID_STATE_FOR_REPLY", "후보를 고르는 단계에서만 다시 확인할 수 있어요."
+            )
+        self._start_live_check(run)
+        self._commit()
+        return self.live.view(
+            run.request_id, self._remaining_candidates(run), self._live_started_at(run)
+        )
+
     def _remaining_candidates(self, run: Run) -> list[dict]:
         tried = set(run.context.get("tried_candidate_ids", []))
         return [c for c in run.context.get("candidates", []) if c["candidate_id"] not in tried]
@@ -1487,7 +1571,7 @@ class OrchestratorService:
         }
         try:
             res = self._call(run, "C", "C-MIN-ORDER", lambda: check(body))
-        except (AppError, DependencyFailed):
+        except AppError, DependencyFailed:
             return cands
         marked = []
         for c, r in zip(cands, res.get("results", []), strict=False):
@@ -1583,7 +1667,8 @@ class OrchestratorService:
                             *(("split",) if o.get("split") else ()),
                         )
                     },
-                    "name": info.get(o["payment_method_id"], {}).get("name") or o["payment_method_id"],
+                    "name": info.get(o["payment_method_id"], {}).get("name")
+                    or o["payment_method_id"],
                     "method_type": info.get(o["payment_method_id"], {}).get("type"),
                 }
                 for o in rec["options"]

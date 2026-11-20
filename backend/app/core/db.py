@@ -75,6 +75,7 @@ def init_db(bind=None) -> None:
     import app.modules.delegation.models  # noqa: F401  (테이블 등록용 import)
     import app.modules.discovery.catalog_models  # noqa: F401  (restaurant·menu)
     import app.modules.discovery.models  # noqa: F401  (A)
+    import app.modules.livecheck.models  # noqa: F401  (요기요 실시간 식당 확인)
     import app.modules.orchestrator.models  # noqa: F401
     import app.modules.ordering.models  # noqa: F401  (B)
 

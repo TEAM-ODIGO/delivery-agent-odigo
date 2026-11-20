@@ -91,9 +91,13 @@ class CheckResult:
     observed: dict | None = None
     seconds: float = 0.0
     attempts: int = 0
+    page: dict | None = None  # 식당 화면에서 읽은 원본 (메뉴 카드 전체). 저장·재판정용
+    cached: bool = False  # 최근 확인 결과를 다시 씀
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), ensure_ascii=False)
+        data = asdict(self)
+        data.pop("page", None)  # 메뉴 카드 전체는 길어서 기록 파일에는 넣지 않는다
+        return json.dumps(data, ensure_ascii=False)
 
 
 # ------------------------------------------ 읽은 값 해석 (페이지 없이 시험 가능)
@@ -186,13 +190,17 @@ def judge(target: CheckTarget, obs: Observed) -> tuple[str, list[str], str | Non
 
 
 # ---------------------------------------------------------------- 브라우저로 한 곳 확인
-async def check_page(page, target: CheckTarget, *, base_url: str = BASE, timeout_ms: int = 8000):
-    """열린 탭에서 식당 하나를 확인한다. 서비스 미제공·차단은 보이는 즉시 끝낸다."""
-    obs = Observed()
-    await page.goto(f"{base_url}{target.restaurant_id}/", wait_until="domcontentloaded")
+async def observe_page(
+    page, restaurant_id: str, *, base_url: str = BASE, timeout_ms: int = 8000
+) -> dict:
+    """식당 화면 하나를 읽는다. 후보와 상관없는 값이라 저장해 두고 후보마다 다시 판정할 수 있다.
+
+    서비스 미제공·차단·첫 화면으로 돌아감은 보이는 즉시 끝낸다.
+    """
+    await page.goto(f"{base_url}{restaurant_id}/", wait_until="domcontentloaded")
     deadline = time.monotonic() + timeout_ms / 1000
+    here = f"/{restaurant_id}/"
     state: dict = {}
-    here = f"/{target.restaurant_id}/"
     while True:
         state = await page.evaluate(_PAGE_STATE)
         if state["denied"] or state["notServing"] or state["menus"] > 0:
@@ -202,16 +210,45 @@ async def check_page(page, target: CheckTarget, *, base_url: str = BASE, timeout
         if time.monotonic() >= deadline:
             break
         await page.wait_for_timeout(250)
-    obs.url, obs.denied, obs.not_serving = state.get("url"), state["denied"], state["notServing"]
-    obs.menus_total = state["menus"]
-    if obs.url and here not in obs.url and not obs.denied:
-        obs.redirected, obs.menus_total = True, 0
-    if obs.menus_total > 0 and not obs.not_serving:
-        obs.items = read_items(await page.evaluate(_READ_MENUS), target.items)
+    url = state.get("url")
+    obs = {
+        "url": url,
+        "denied": state["denied"],
+        "not_serving": state["notServing"],
+        "redirected": bool(url) and here not in url and not state["denied"],
+        "menus": [],
+        "delivery_fee_krw": None,
+        "min_order_krw": None,
+    }
+    if state["menus"] > 0 and not obs["not_serving"] and not obs["redirected"]:
+        obs["menus"] = await page.evaluate(_READ_MENUS)
         page_text = await page.evaluate(_PAGE_TEXT)
-        obs.delivery_fee_krw = delivery_fee(await page.evaluate(_CART_TEXT), page_text)
-        obs.min_order_krw = _won(page_text, "최소주문금액")
+        obs["delivery_fee_krw"] = delivery_fee(await page.evaluate(_CART_TEXT), page_text)
+        obs["min_order_krw"] = _won(page_text, "최소주문금액")
     return obs
+
+
+def observed_for(page_obs: dict, target: CheckTarget) -> Observed:
+    """식당 화면 원본 → 이 후보 기준으로 읽은 값."""
+    menus = page_obs.get("menus") or []
+    return Observed(
+        url=page_obs.get("url"),
+        not_serving=bool(page_obs.get("not_serving")),
+        denied=bool(page_obs.get("denied")),
+        redirected=bool(page_obs.get("redirected")),
+        menus_total=len(menus),
+        items=read_items(menus, target.items) if menus else {},
+        delivery_fee_krw=page_obs.get("delivery_fee_krw"),
+        min_order_krw=page_obs.get("min_order_krw"),
+    )
+
+
+async def check_page(page, target: CheckTarget, *, base_url: str = BASE, timeout_ms: int = 8000):
+    """열린 탭에서 식당 하나를 확인한다 (이 후보 기준으로 읽은 값)."""
+    page_obs = await observe_page(
+        page, target.restaurant_id, base_url=base_url, timeout_ms=timeout_ms
+    )
+    return observed_for(page_obs, target)
 
 
 Checker = Callable[[CheckTarget], Awaitable[CheckResult]]
@@ -222,8 +259,12 @@ def browser_checker(context, *, base_url: str = BASE, timeout_ms: int = 8000) ->
         started = time.monotonic()
         page = await context.new_page()
         page.on("dialog", lambda d: asyncio.ensure_future(d.dismiss()))
+        page_obs = None
         try:
-            obs = await check_page(page, target, base_url=base_url, timeout_ms=timeout_ms)
+            page_obs = await observe_page(
+                page, target.restaurant_id, base_url=base_url, timeout_ms=timeout_ms
+            )
+            obs = observed_for(page_obs, target)
             status, changes, reason = judge(target, obs)
             observed = asdict(obs)
         except Exception as exc:  # noqa: BLE001 — 한 곳의 오류가 전체를 멈추지 않게
@@ -234,7 +275,13 @@ def browser_checker(context, *, base_url: str = BASE, timeout_ms: int = 8000) ->
             except Exception:  # noqa: BLE001
                 pass
         return CheckResult(
-            target.restaurant_id, status, changes, reason, observed, time.monotonic() - started
+            target.restaurant_id,
+            status,
+            changes,
+            reason,
+            observed,
+            time.monotonic() - started,
+            page=page_obs,
         )
 
     return check
