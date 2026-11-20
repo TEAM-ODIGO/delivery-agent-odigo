@@ -156,3 +156,12 @@ table.data tr.sel td { background: var(--pri-soft); }
 .admin-bar .input { width: 280px; padding: 9px 12px; font-size: 14px; }
 .admin .chip { height: 32px; }
 @media (max-width: 960px) { .admin-grid { grid-template-columns: 1fr; } .admin { padding: 20px 16px; } }
+
+/* 요기요 실시간 식당 확인 (후보 화면) */
+.live-bar { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; background: var(--soft); }
+.live-bar-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--sub); }
+.live-track { height: 4px; border-radius: 2px; background: #e2e4e8; overflow: hidden; }
+.live-track i { display: block; height: 100%; background: var(--pri); transition: width .3s; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--pri); font-weight: 700; cursor: pointer; }
+.link-btn:disabled { color: var(--faint); cursor: default; }
+.warn-text { color: var(--warn); }

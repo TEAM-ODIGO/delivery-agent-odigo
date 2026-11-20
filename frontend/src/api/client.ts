@@ -1,5 +1,5 @@
 // 화면은 O만 부른다 (/orchestrator/...). 개발 서버가 백엔드로 넘겨 준다(vite.config.ts).
-import type { AuditLog, Delegation, PaymentMethod, Reply, RunEvent, RunRow, RunView, YogiyoCartJob } from "./types";
+import type { AuditLog, Delegation, PaymentMethod, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -124,6 +124,12 @@ export const api = {
   // O-14 요기요 장바구니 담기 결과
   getYogiyoCart: (requestId: string) =>
     call<YogiyoCartJob>(`/orchestrator/runs/${requestId}/yogiyo-cart`),
+  // O-15 후보 요기요 실시간 확인 결과
+  getLiveCheck: (requestId: string) =>
+    call<LiveCheckView>(`/orchestrator/runs/${requestId}/live-check`),
+  // O-16 후보 요기요 실시간 다시 확인
+  recheckLive: (requestId: string) =>
+    call<LiveCheckView>(`/orchestrator/runs/${requestId}/live-check`, { method: "POST" }),
   // O-12 (관리자) — D-09 감사 로그
   auditLogs: (token: string, requestId: string) =>
     call<{ count: number; results: AuditLog[] }>(

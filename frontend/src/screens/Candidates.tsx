@@ -4,23 +4,39 @@
 //   아니오 → 주문을 취소하고 처음 화면으로 돌아간다.
 // 최소주문금액 미달(로컬 확장): orderable=false인 후보는 비활성으로 보이고 선택할 수 없다.
 //   카드 아래에 "최소주문금액이 맞지 않아서 주문이 불가합니다"를 보여 준다.
+// 요기요 실시간 확인(O-15): 화면은 기다리지 않고 뜨고, 결과가 오는 대로 진행 바와 배지가 바뀐다.
+//   주문 불가로 확인된 후보는 숨기지 않고 제자리에 사유와 함께 비활성으로 보인다(selectable=false).
+//   고를 수 있는 후보가 3곳 되도록 다음 순번 후보가 아래에 나온다(visible).
 import { useEffect, useState } from "react";
 import type { StepProps } from "../pages/RunPage";
-import type { Candidate } from "../api/types";
+import type { Candidate, LiveResult } from "../api/types";
+import { LiveBadge, LiveCheckBar, useLiveCheck, useRecheckLive } from "../components/LiveCheck";
 import { Banner, Button, Modal, Screen, Tag } from "../components/ui";
 import { krw } from "../lib/format";
 
 const isOver = (c: Candidate) => c.violations.some((v) => v.code === "BUDGET_EXCEEDED");
-const isOrderable = (c: Candidate) => c.orderable !== false;
 const MIN_ORDER_TEXT = "최소주문금액이 맞지 않아서 주문이 불가합니다";
+const DEFAULT_SHOWN = 3; // 확인 결과가 오기 전에 보여 줄 후보 수 (예비 후보는 숨김)
 
 export default function Candidates({ view, busy, send, cancel, decline }: StepProps) {
   const prompt = view.prompt;
-  const list = prompt?.type === "SELECT_CANDIDATE" ? prompt.candidates : [];
+  const all = prompt?.type === "SELECT_CANDIDATE" ? prompt.candidates : [];
+  const live = useLiveCheck(view.request_id);
+  const recheck = useRecheckLive(view.request_id);
+  const lc = live.data && live.data.state !== "OFF" ? live.data : null;
+  const liveOf = (c: Candidate): LiveResult | undefined => lc?.results.find((r) => r.candidate_index === c.index);
+  // 보일 후보: 확인 결과가 있으면 그 visible대로, 없으면 앞에서 3곳 (확인이 꺼져 있으면 전부)
+  const list = lc
+    ? all.filter((c) => liveOf(c)?.visible ?? true)
+    : live.data?.state === "OFF"
+      ? all
+      : all.slice(0, DEFAULT_SHOWN);
+  const isOrderable = (c: Candidate) => c.orderable !== false && liveOf(c)?.selectable !== false;
   const orderable = list.filter(isOrderable);
   const [picked, setPicked] = useState<number | null>(orderable[0]?.index ?? null);
   const chosen = orderable.find((c) => c.index === picked) ?? orderable[0];
   const nothingOrderable = list.length > 0 && orderable.length === 0;
+  const allClosedOnYogiyo = !!lc?.all_unavailable;
 
   const noneWithinBudget = orderable.length > 0 && orderable.every(isOver);
   const [consent, setConsent] = useState(false); // 예산 초과를 알고 계속하겠다고 답했는가
@@ -68,11 +84,21 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
     >
       {view.notice && <Banner tone="warn">{view.notice.message}</Banner>}
       {consent && <Banner tone="pri">예산을 넘는 가게로 계속 진행해요. 결제 전에 금액을 한 번 더 확인해 드려요.</Banner>}
-      {nothingOrderable && (
-        <Banner tone="warn">지금 조건으로는 주문할 수 있는 가게가 없어요. 금액이나 인원을 바꿔 다시 주문해 주세요.</Banner>
-      )}
+      {lc && <LiveCheckBar lc={lc} onRecheck={() => recheck.mutate()} rechecking={recheck.isPending} />}
+      {nothingOrderable &&
+        (allClosedOnYogiyo ? (
+          <Banner tone="warn">추천한 가게가 모두 지금 요기요에서 주문을 받지 않아요. 조건을 바꿔 다시 주문해 주세요.</Banner>
+        ) : (
+          <Banner tone="warn">지금 조건으로는 주문할 수 있는 가게가 없어요. 금액이나 인원을 바꿔 다시 주문해 주세요.</Banner>
+        ))}
       {list.map((c) => (
-        <CandidateCard key={c.index} c={c} selected={chosen?.index === c.index} onClick={() => setPicked(c.index)} />
+        <CandidateCard
+          key={c.index}
+          c={c}
+          live={liveOf(c)}
+          selected={chosen?.index === c.index}
+          onClick={() => setPicked(c.index)}
+        />
       ))}
 
       {ask === "all" && (
@@ -131,7 +157,17 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
   );
 }
 
-function CandidateCard({ c, selected, onClick }: { c: Candidate; selected: boolean; onClick: () => void }) {
+function CandidateCard({
+  c,
+  live,
+  selected,
+  onClick,
+}: {
+  c: Candidate;
+  live: LiveResult | undefined;
+  selected: boolean;
+  onClick: () => void;
+}) {
   const r = c.restaurant;
   const meta = [
     r.rating !== null ? `★ ${r.rating.toFixed(1)}` : null,
@@ -144,7 +180,9 @@ function CandidateCard({ c, selected, onClick }: { c: Candidate; selected: boole
         ? "지역화폐 가능"
         : "지역화폐 가능(추정)"
       : null;
-  const blocked = !isOrderable(c);
+  const minOrderBlocked = c.orderable === false;
+  const liveBlocked = live?.selectable === false;
+  const blocked = minOrderBlocked || liveBlocked;
   const minOrderText = c.violations.find((v) => v.code === "MIN_ORDER_NOT_MET")?.message ?? MIN_ORDER_TEXT;
   const violationText = c.violations
     .filter((v) => v.code !== "MIN_ORDER_NOT_MET")
@@ -167,7 +205,7 @@ function CandidateCard({ c, selected, onClick }: { c: Candidate; selected: boole
         {c.items.map((i) => `${i.name} ${i.quantity}${i.unit_price_krw !== null ? ` × ${krw(i.unit_price_krw)}` : ""}`).join(", ")}
       </span>
       <div className="tags">
-        {blocked ? (
+        {liveBlocked ? null : minOrderBlocked ? (
           <Tag tone="bad">주문 불가</Tag>
         ) : c.meets_all_constraints ? (
           <Tag tone="ok">조건 충족</Tag>
@@ -175,8 +213,13 @@ function CandidateCard({ c, selected, onClick }: { c: Candidate; selected: boole
           <Tag tone="warn">조건 일부 벗어남</Tag>
         )}
         {local && <Tag tone="pri">{local}</Tag>}
+        <LiveBadge r={live} />
       </div>
-      {blocked && (
+      {liveBlocked && <span className="small bad-text">{live?.reason ?? "지금 요기요에서 주문할 수 없어요"}</span>}
+      {live?.status === "CHANGED" && live.changes.length > 0 && (
+        <span className="small warn-text">요기요 현재: {live.changes.join(" · ")}</span>
+      )}
+      {minOrderBlocked && (
         <>
           <span className="small bad-text">{minOrderText}</span>
           {c.min_order && (
