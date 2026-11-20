@@ -252,3 +252,37 @@ export interface YogiyoCartJob {
   created_at?: string;
   finished_at?: string | null;
 }
+
+// O-15 / O-16 요기요 실시간 식당 확인
+export type LiveStatus =
+  | "CHECKING"
+  | "OK"
+  | "CHANGED"
+  | "UNAVAILABLE"
+  | "BLOCKED"
+  | "ERROR"
+  | "SKIPPED"
+  | "NOT_CHECKED";
+
+export interface LiveResult {
+  candidate_index: number;
+  restaurant_id: string;
+  status: LiveStatus;
+  changes: string[];
+  reason: string | null;
+  checked_at: string | null;
+  visible?: boolean; // 화면에 보일 후보 (고를 수 있는 후보가 want곳 나올 때까지 순위대로)
+  selectable?: boolean; // 주문 불가로 확인되면 false
+}
+
+export interface LiveCheckView {
+  mode: "fake" | "real" | "off" | string;
+  state: "RUNNING" | "DONE" | "NONE" | "OFF";
+  total: number;
+  done: number;
+  passed?: number;
+  want?: number;
+  all_unavailable?: boolean;
+  started_at?: string | null;
+  results: LiveResult[];
+}
