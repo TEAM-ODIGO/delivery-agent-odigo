@@ -1,0 +1,23 @@
+# 비밀·개인 설정 (절대 올리지 않는다)
+.env
+*.env
+!.env.example
+
+# 가상환경·캐시
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# 로컬 DB
+*.db
+*.sqlite3
+
+# 편집기·OS
+.vscode/
+.idea/
+.DS_Store
+
+# 요기요 장바구니 담기 캡처
+cart_runs/

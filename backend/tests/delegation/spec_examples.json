@@ -1,0 +1,370 @@
+{
+  "source": "API명세서_수정안_20261115.xlsx",
+  "apis": {
+    "D-01": {
+      "method": "POST",
+      "endpoint": "/delegation/policies",
+      "status": 201,
+      "request": {
+        "request_id": "REQ001",
+        "user_id": "U001",
+        "original_message": "둘이서 2만원 이하로 안 매운 치킨 빨리 시켜줘",
+        "constraints_confirmed": true,
+        "constraints": {
+          "budget_krw": 20000,
+          "people": 2,
+          "cuisine": "치킨",
+          "excluded_ingredients": [],
+          "max_spice_level": 0,
+          "payment_requirements": {
+            "local_currency_only": false
+          },
+          "delivery_address": {
+            "region_code": "11680",
+            "lat": 37.5006,
+            "lng": 127.0365
+          },
+          "max_delivery_minutes": 40,
+          "menu_keywords": []
+        },
+        "delegation": {
+          "allowed_actions": [
+            "SEARCH",
+            "BUILD_ORDER",
+            "REQUEST_PAYMENT"
+          ],
+          "allowed_payment_method_ids": [
+            "CARD001",
+            "LOCAL001"
+          ],
+          "max_charge_krw": 20000
+        }
+      },
+      "response": {
+        "policy_id": "550e8400-e29b-41d4-a716-446655440000",
+        "request_id": "REQ001",
+        "policy_version": 1,
+        "status": "ACTIVE",
+        "revoked_approval_ids": []
+      },
+      "error_codes": [
+        "FORBIDDEN_USER",
+        "UNAUTHORIZED_SERVICE",
+        "VALIDATION_ERROR"
+      ],
+      "auth": "service"
+    },
+    "D-02": {
+      "method": "POST",
+      "endpoint": "/delegation/validations/orders",
+      "status": 200,
+      "request": {
+        "request_id": "REQ001",
+        "user_id": "U001",
+        "policy_id": "550e8400-e29b-41d4-a716-446655440000",
+        "policy_version": 1,
+        "approval_target_id": "target_001",
+        "order_version": 1,
+        "quote": {
+          "quote_id": "QT001",
+          "restaurant_id": "STORE101",
+          "items": [
+            {
+              "menu_id": "MENU011",
+              "name": "후라이드치킨",
+              "description": "국내산 닭, 순한맛",
+              "quantity": 1,
+              "unit_price_krw": 17000,
+              "options": [
+                {
+                  "option_id": "OPT001",
+                  "price_krw": 1000
+                }
+              ]
+            }
+          ],
+          "menu_subtotal_krw": 18000,
+          "delivery_fee_krw": 2000,
+          "payment_method_id": "CARD001",
+          "instant_discount_krw": 2000,
+          "charge_krw": 18000,
+          "catalog_version": "CAT-V1",
+          "benefit_rule_version": "BEN-V1",
+          "expires_at": "2026-11-13T11:00:00+09:00",
+          "unverified_conditions": []
+        }
+      },
+      "response": {
+        "valid": true,
+        "reason_codes": [],
+        "approval_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "approval_status": "PENDING",
+        "proposal_hash": "sha256:3f2a…",
+        "expires_at": "2026-11-13T10:52:00+09:00",
+        "details": {}
+      },
+      "error_codes": [
+        "FORBIDDEN_USER",
+        "POLICY_NOT_FOUND",
+        "UNAUTHORIZED_SERVICE"
+      ],
+      "auth": "service"
+    },
+    "D-03": {
+      "method": "POST",
+      "endpoint": "/delegation/approvals/{approval_id}/confirm",
+      "status": 200,
+      "request": {
+        "user_id": "U001",
+        "proposal_hash": "sha256:3f2a…"
+      },
+      "response": {
+        "approval_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "status": "APPROVED",
+        "approved_at": "2026-11-13T10:45:00+09:00",
+        "execution_id": "EXE-4b1f9c2e8a",
+        "expires_at": "2026-11-13T10:52:00+09:00"
+      },
+      "error_codes": [
+        "APPROVAL_EXPIRED",
+        "APPROVAL_NOT_FOUND",
+        "APPROVAL_NOT_PENDING",
+        "APPROVAL_REVOKED",
+        "FORBIDDEN_USER",
+        "POLICY_CHANGED",
+        "PROPOSAL_HASH_MISMATCH"
+      ],
+      "auth": "service"
+    },
+    "D-04": {
+      "method": "GET",
+      "endpoint": "/delegation/approvals/{approval_id}",
+      "status": 200,
+      "request": null,
+      "response": {
+        "approval_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "request_id": "REQ001",
+        "approval_target_id": "target_001",
+        "order_version": 1,
+        "quote_id": "QT001",
+        "status": "APPROVED",
+        "execution_id": "EXE-4b1f9c2e8a",
+        "approved_at": "2026-11-13T10:45:00+09:00",
+        "expires_at": "2026-11-13T10:52:00+09:00",
+        "revoke_reason": null
+      },
+      "error_codes": [
+        "APPROVAL_NOT_FOUND"
+      ],
+      "auth": "service"
+    },
+    "D-05": {
+      "method": "POST",
+      "endpoint": "/delegation/approvals/{approval_id}/revoke",
+      "status": 200,
+      "request": {
+        "reason_code": "USER_CANCELLED"
+      },
+      "response": {
+        "approval_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "status": "REVOKED"
+      },
+      "error_codes": [
+        "ALREADY_EXECUTED",
+        "APPROVAL_NOT_FOUND"
+      ],
+      "auth": "service"
+    },
+    "D-06": {
+      "method": "POST",
+      "endpoint": "/delegation/authorizations/check",
+      "status": 200,
+      "request": {
+        "execution_id": "EXE-4b1f9c2e8a",
+        "approval_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "quote_id": "QT001",
+        "proposal_hash": "sha256:3f2a…",
+        "charge_krw": 18000,
+        "payment_method_id": "CARD001"
+      },
+      "response": {
+        "execution_id": "EXE-4b1f9c2e8a",
+        "allowed": true,
+        "reason_codes": []
+      },
+      "error_codes": [
+        "INTERNAL_ERROR",
+        "UNAUTHORIZED_SERVICE",
+        "VALIDATION_ERROR"
+      ],
+      "auth": "service"
+    },
+    "D-07": {
+      "method": "GET",
+      "endpoint": "/delegation/health",
+      "status": 200,
+      "request": null,
+      "response": {
+        "service": "delegation",
+        "status": "UP"
+      },
+      "error_codes": [
+        "DOWN"
+      ],
+      "auth": "none"
+    },
+    "D-08": {
+      "method": "POST",
+      "endpoint": "/delegation/payments/results",
+      "status": 200,
+      "request": {
+        "execution_id": "EXE-4b1f9c2e8a",
+        "payment_id": "PAY001",
+        "status": "APPROVED",
+        "charge_krw": 18000
+      },
+      "response": {
+        "execution_id": "EXE-4b1f9c2e8a",
+        "recorded": true,
+        "status": "APPROVED"
+      },
+      "error_codes": [
+        "EXECUTION_NOT_FOUND",
+        "FAILED",
+        "RESULT_CONFLICT"
+      ],
+      "auth": "service"
+    },
+    "D-09": {
+      "method": "GET",
+      "endpoint": "/delegation/audit-logs",
+      "status": 200,
+      "request": null,
+      "response": {
+        "count": 1,
+        "results": [
+          {
+            "log_id": "LOG001",
+            "event_type": "PAYMENT_CHECK",
+            "request_id": "REQ001",
+            "approval_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+            "execution_id": "EXE-4b1f9c2e8a",
+            "actor": "E",
+            "result": "ALLOWED",
+            "reason_codes": [],
+            "details": {
+              "approved_krw": 18000,
+              "requested_krw": 18000
+            },
+            "created_at": "2026-11-13T10:46:00+09:00"
+          }
+        ]
+      },
+      "error_codes": [
+        "UNAUTHORIZED_SERVICE",
+        "VALIDATION_ERROR"
+      ],
+      "auth": "service"
+    },
+    "C-05": {
+      "method": "POST",
+      "endpoint": "/benefit/calculations",
+      "status": 200,
+      "request": {
+        "request_id": "REQ001",
+        "user_id": "U001",
+        "restaurant_id": "STORE101",
+        "menu_subtotal_krw": 18000,
+        "delivery_fee_krw": 2000,
+        "payment_method_id": "CARD001",
+        "benefit_rule_version": "BEN-V1"
+      },
+      "response": {
+        "payment_method_id": "CARD001",
+        "eligible": true,
+        "benefit_rule_version": "BEN-V1",
+        "instant_discount_krw": 2000,
+        "charge_krw": 18000,
+        "applied_benefits": [
+          {
+            "rule_id": "RULE-CARD-A-DELIVERY",
+            "type": "INSTANT_DISCOUNT",
+            "amount_krw": 2000
+          }
+        ],
+        "reason_codes": [],
+        "mock": true
+      },
+      "error_codes": [
+        "RULE_NOT_FOUND"
+      ],
+      "auth": "service"
+    },
+    "C-02": {
+      "method": "GET",
+      "endpoint": "/benefit/users/{user_id}/payment-methods",
+      "status": 200,
+      "request": null,
+      "response": {
+        "count": 2,
+        "results": [
+          {
+            "payment_method_id": "CARD001",
+            "product_id": "PRD-CARD-A",
+            "type": "CARD",
+            "name": "가상카드 A",
+            "monthly_performance_krw": 350000,
+            "monthly_benefit_remaining_krw": 8000,
+            "status": "ACTIVE"
+          },
+          {
+            "payment_method_id": "LOCAL001",
+            "product_id": "PRD-LOCAL-A",
+            "type": "LOCAL_CURRENCY",
+            "name": "가상 지역화폐",
+            "balance_krw": 120000,
+            "monthly_benefit_remaining_krw": 15000,
+            "status": "ACTIVE"
+          }
+        ],
+        "mock": true
+      },
+      "error_codes": [
+        "USER_NOT_FOUND"
+      ],
+      "auth": "service"
+    },
+    "E-01": {
+      "method": "POST",
+      "endpoint": "/payments",
+      "status": 200,
+      "request": {
+        "request_id": "REQ001",
+        "user_id": "U001",
+        "execution_id": "EXE-4b1f9c2e8a",
+        "approval_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "quote_id": "QT001",
+        "proposal_hash": "sha256:3f2a…",
+        "payment_method_id": "CARD001",
+        "charge_krw": 18000
+      },
+      "response": {
+        "payment_id": "PAY001",
+        "execution_id": "EXE-4b1f9c2e8a",
+        "transaction_id": "TXN001",
+        "request_id": "REQ001",
+        "status": "APPROVED",
+        "charge_krw": 18000,
+        "refunded_krw": 0,
+        "payment_method_id": "CARD001",
+        "approved_at": "2026-11-13T10:46:00+09:00",
+        "mock": true
+      },
+      "error_codes": [
+        "IDEMPOTENCY_CONFLICT",
+        "VALIDATION_ERROR"
+      ],
+      "auth": "service"
+    }
+  }
+}

@@ -1,0 +1,99 @@
+"""D 모듈에서 쓰는 고정 값 목록.
+
+문자열을 코드 곳곳에 직접 쓰지 않고 여기 Enum으로 모아 둔다.
+오타가 나면 실행 전에 에러가 나고, 허용 목록 밖의 값은 들어올 수 없다.
+"""
+
+from enum import StrEnum
+
+
+class Action(StrEnum):
+    """사용자가 Agent에게 맡길 수 있는 작업. 목록에 없는 작업은 요청 단계에서 거부된다."""
+
+    SEARCH = "SEARCH"
+    BUILD_ORDER = "BUILD_ORDER"
+    REQUEST_PAYMENT = "REQUEST_PAYMENT"
+
+
+class PolicyStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    SUPERSEDED = "SUPERSEDED"  # 같은 요청에 새 조건이 등록되어 밀려남
+
+
+class ApprovalStatus(StrEnum):
+    PENDING = "PENDING"  # 검증 통과, 사용자 승인 대기
+    APPROVED = "APPROVED"  # 사용자 승인 완료, execution_id 발급됨
+    CONSUMED = "CONSUMED"  # D-06에서 결제 실행 권한으로 사용됨 (재사용 불가)
+    REVOKED = "REVOKED"  # 철회됨
+    EXPIRED = "EXPIRED"  # 유효시간 지남
+
+
+ACTIVE_APPROVAL_STATUSES = (ApprovalStatus.PENDING, ApprovalStatus.APPROVED)
+
+
+class RevokeReason(StrEnum):
+    QUOTE_CHANGED = "QUOTE_CHANGED"
+    POLICY_CHANGED = "POLICY_CHANGED"
+    USER_CANCELLED = "USER_CANCELLED"
+
+
+class PaymentStatus(StrEnum):
+    """결제 상태 (E 기준 이름). D-08로 O가 전달한다."""
+
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    FAILED = "FAILED"
+    UNKNOWN = "UNKNOWN"
+
+
+FINAL_PAYMENT_STATUSES = (PaymentStatus.APPROVED, PaymentStatus.FAILED)
+
+
+class PaymentMethodType(StrEnum):
+    CARD = "CARD"
+    LOCAL_CURRENCY = "LOCAL_CURRENCY"
+
+
+class Reason(StrEnum):
+    """검증 실패 사유 코드. 명세(02 문서)의 코드와 1:1로 맞춘다."""
+
+    # D-02 주문 검증
+    POLICY_VERSION_MISMATCH = "POLICY_VERSION_MISMATCH"
+    CONSTRAINTS_NOT_CONFIRMED = "CONSTRAINTS_NOT_CONFIRMED"
+    QUOTE_EXPIRED = "QUOTE_EXPIRED"
+    AMOUNT_MISMATCH = "AMOUNT_MISMATCH"
+    BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
+    PAYMENT_METHOD_NOT_ALLOWED = "PAYMENT_METHOD_NOT_ALLOWED"
+    ACTION_NOT_ALLOWED = "ACTION_NOT_ALLOWED"
+    INGREDIENT_CONFLICT = "INGREDIENT_CONFLICT"
+    INGREDIENT_UNKNOWN = "INGREDIENT_UNKNOWN"
+    QUOTE_DATA_UNVERIFIED = "QUOTE_DATA_UNVERIFIED"
+    # D-06 결제 직전 검증
+    APPROVAL_NOT_FOUND = "APPROVAL_NOT_FOUND"
+    APPROVAL_NOT_CONFIRMED = "APPROVAL_NOT_CONFIRMED"
+    APPROVAL_REVOKED = "APPROVAL_REVOKED"
+    APPROVAL_EXPIRED = "APPROVAL_EXPIRED"
+    ALREADY_EXECUTED = "ALREADY_EXECUTED"
+    EXECUTION_ID_MISMATCH = "EXECUTION_ID_MISMATCH"
+    EXECUTION_CONFLICT = "EXECUTION_CONFLICT"
+    QUOTE_ID_MISMATCH = "QUOTE_ID_MISMATCH"
+    PROPOSAL_HASH_MISMATCH = "PROPOSAL_HASH_MISMATCH"
+    PAYMENT_AMOUNT_MISMATCH = "PAYMENT_AMOUNT_MISMATCH"
+    PAYMENT_METHOD_MISMATCH = "PAYMENT_METHOD_MISMATCH"
+    POLICY_CHANGED = "POLICY_CHANGED"
+
+
+class EventType(StrEnum):
+    """감사 로그 이벤트 종류 (02 문서 5절)."""
+
+    POLICY_REGISTERED = "POLICY_REGISTERED"
+    ORDER_VALIDATED = "ORDER_VALIDATED"
+    APPROVAL_CONFIRMED = "APPROVAL_CONFIRMED"
+    APPROVAL_REVOKED = "APPROVAL_REVOKED"
+    PAYMENT_CHECK = "PAYMENT_CHECK"
+    PAYMENT_RESULT = "PAYMENT_RESULT"  # D-08 결제 결과 기록 (MVP 2)
+
+
+class Actor(StrEnum):
+    ORCHESTRATOR = "ORCHESTRATOR"
+    E = "E"
