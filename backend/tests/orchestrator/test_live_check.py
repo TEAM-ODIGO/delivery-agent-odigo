@@ -247,3 +247,104 @@ def test_api_recheck_only_while_choosing(env, client):
     v = env.flow("AWAITING_APPROVAL")
     r = client.post(f"/orchestrator/runs/{v['request_id']}/live-check", headers=USER)
     assert r.status_code == 409
+
+
+# ---------------------------------------- real 모드 (이슈 ④): 브라우저 없이 흉내
+class FakeContext:
+    def __init__(self):
+        self.closed = False
+
+    async def add_init_script(self, script):
+        pass
+
+    async def close(self):
+        self.closed = True
+
+
+class FakeBrowser:
+    def __init__(self):
+        self.contexts = []
+
+    async def new_context(self, **kw):
+        self.contexts.append(FakeContext())
+        return self.contexts[-1]
+
+
+class FakeKeeper:
+    """장바구니와 함께 쓰는 브라우저(BrowserKeeper) 흉내."""
+
+    def __init__(self):
+        self.browser = FakeBrowser()
+        self.calls = []
+
+    def with_browser(self, fn, *, headless=False, browser_channel=None):
+        import asyncio
+
+        self.calls.append({"headless": headless, "channel": browser_channel})
+        return asyncio.run(fn(self.browser))
+
+
+@pytest.fixture
+def real_live(env, monkeypatch):
+    from app.modules.livecheck import checker
+    from app.modules.livecheck.checker import CheckResult
+
+    opened = []
+
+    def fake_browser_checker(context, **kw):
+        async def check(t):
+            opened.append(t.restaurant_id)
+            menus = [
+                {"id": i.menu_id, "text": f"{i.name} {i.expected_price_krw or 0:,}원"}
+                for i in t.items
+            ]
+            page = {"url": f"/#/{t.restaurant_id}/", "menus": menus}
+            return CheckResult(t.restaurant_id, "OK", page=page, seconds=0.01)
+
+        return check
+
+    monkeypatch.setattr(checker, "browser_checker", fake_browser_checker)
+    keeper = FakeKeeper()
+    settings = LiveCheckSettings(mode="real", timeout_seconds=0, want=2, cache_minutes=15)
+    svc = LiveCheckService(
+        env.sf, settings=settings, executor=Inline(), now=env.clock, keeper=keeper
+    )
+    env.svc = functools.partial(type(env).svc, env, live_check=svc)
+    return svc, keeper, opened
+
+
+def test_real_mode_shares_cart_browser_and_closes_its_window(env, real_live):
+    svc, keeper, opened = real_live
+    v = env.flow("CANDIDATES_READY")
+    lc = _view(env, v)
+    assert [r["status"] for r in lc["results"]] == ["OK", "OK", "SKIPPED"]
+    assert len(keeper.calls) == 1 and keeper.calls[0]["headless"] is False  # 창을 띄우는 모드
+    assert len(keeper.browser.contexts) == 1 and keeper.browser.contexts[0].closed  # 확인 창만 닫음
+    assert lc["seconds"] is not None
+    assert [r["cached"] for r in lc["results"][:2]] == [False, False]
+    assert all(isinstance(r["seconds"], float) for r in lc["results"][:2])
+
+
+def test_real_mode_reuses_recent_checks_for_15_minutes(env, real_live):
+    svc, keeper, opened = real_live
+    env.flow("CANDIDATES_READY")
+    first = list(opened)
+    v = env.flow("CANDIDATES_READY")  # 15분 안에 같은 후보 → 다시 열지 않음
+    assert opened == first
+    assert [r["cached"] for r in _view(env, v)["results"][:2]] == [True, True]
+
+    env.clock.advance(minutes=16)
+    v2 = env.flow("CANDIDATES_READY")
+    assert len(opened) == 2 * len(first)  # 15분이 지나면 다시 연다
+    assert [r["cached"] for r in _view(env, v2)["results"][:2]] == [False, False]
+
+
+def test_real_mode_recheck_ignores_recent_checks(env, real_live):
+    svc, keeper, opened = real_live
+    v = env.flow("CANDIDATES_READY")
+    first = list(opened)
+    env.clock.advance(minutes=1)  # 1분 뒤 (15분 캐시 안)
+    again = env.svc().live_recheck("U001", v["request_id"])  # "다시 확인" (O-16)
+    assert len(opened) == 2 * len(first)  # 15분 안이어도 요기요를 다시 연다
+    assert [r["cached"] for r in again["results"][:2]] == [False, False]
+    assert [r["cached"] for r in _view(env, v)["results"][:2]] == [False, False]

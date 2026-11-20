@@ -1465,12 +1465,17 @@ class OrchestratorService:
 
     # ================================================================ 화면에 보낼 내용
     # ---------------------------------------------------------------- 요기요 실시간 확인
-    def _start_live_check(self, run: Run) -> None:
+    def _start_live_check(self, run: Run, *, fresh_only: bool = False) -> None:
         """후보 확인을 시작한다. 주문이 저장된 뒤 작업 스레드에 맡긴다 (후보 화면은 안 기다림)."""
         started = self.now()
-        self._set_ctx(run, live_check={"started_at": started.isoformat()})
+        self._set_ctx(run, live_check={"started_at": started.isoformat(), "fresh_only": fresh_only})
         rid, cands, message = run.request_id, list(run.context["candidates"]), run.message
-        self._after_commit.append(lambda: self.live.start(rid, cands, message, started))
+        self._after_commit.append(
+            lambda: self.live.start(rid, cands, message, started, fresh_only=fresh_only)
+        )
+
+    def _live_fresh_only(self, run: Run) -> bool:
+        return bool((run.context or {}).get("live_check", {}).get("fresh_only"))
 
     def _live_started_at(self, run: Run) -> datetime | None:
         raw = (run.context or {}).get("live_check", {}).get("started_at")
@@ -1483,7 +1488,12 @@ class OrchestratorService:
         """
         if not self.live:
             return
-        v = self.live.verdict(run.request_id, cand, self._live_started_at(run))
+        v = self.live.verdict(
+            run.request_id,
+            cand,
+            self._live_started_at(run),
+            fresh_only=self._live_fresh_only(run),
+        )
         self._event(
             run,
             RunEventType.LIVE_CHECKED,
@@ -1513,7 +1523,9 @@ class OrchestratorService:
         if not self.live:
             return {"mode": "off", "state": "OFF", "total": 0, "done": 0, "results": []}
         cands = self._remaining_candidates(run) if run.context else []
-        return self.live.view(run.request_id, cands, self._live_started_at(run))
+        return self.live.view(
+            run.request_id, cands, self._live_started_at(run), self._live_fresh_only(run)
+        )
 
     def live_recheck(self, user_id: str, request_id: str) -> dict:
         """O-16. 후보를 다시 확인한다 (real 모드 캐시 무시). 후보 선택 단계에서만."""
@@ -1524,10 +1536,13 @@ class OrchestratorService:
             raise AppError(
                 409, "INVALID_STATE_FOR_REPLY", "후보를 고르는 단계에서만 다시 확인할 수 있어요."
             )
-        self._start_live_check(run)
+        self._start_live_check(run, fresh_only=True)  # 다시 확인: 최근 확인(캐시)을 쓰지 않음
         self._commit()
         return self.live.view(
-            run.request_id, self._remaining_candidates(run), self._live_started_at(run)
+            run.request_id,
+            self._remaining_candidates(run),
+            self._live_started_at(run),
+            fresh_only=True,
         )
 
     def _remaining_candidates(self, run: Run) -> list[dict]:

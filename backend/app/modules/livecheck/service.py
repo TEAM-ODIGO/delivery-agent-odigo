@@ -135,15 +135,26 @@ class LiveCheckService:
         settings: LiveCheckSettings | None = None,
         executor: Executor | None = None,
         now: Callable[[], datetime] = core_clock.now,
+        keeper=None,
     ):
         self.sf = session_factory
         self.cfg = settings or LiveCheckSettings()
         self._executor = executor
         self.now = now
+        self._keeper = keeper
 
     @property
     def enabled(self) -> bool:
         return self.cfg.enabled
+
+    @property
+    def keeper(self):
+        """real 모드 브라우저: 장바구니 담기와 같은 브라우저를 쓴다 (요기요 창이 하나만 뜬다)."""
+        if self._keeper is None:
+            from app.modules.cart.service import _keeper
+
+            self._keeper = _keeper()
+        return self._keeper
 
     @property
     def executor(self) -> Executor:
@@ -155,17 +166,61 @@ class LiveCheckService:
 
     # ------------------------------------------------------------ 시작
     def start(
-        self, request_id: str, candidates: list[dict], message: str, started_at: datetime
+        self,
+        request_id: str,
+        candidates: list[dict],
+        message: str,
+        started_at: datetime,
+        *,
+        fresh_only: bool = False,
     ) -> None:
-        """후보 확인을 작업 스레드에 맡긴다 (주문 저장이 끝난 뒤 부른다)."""
+        """후보 확인을 작업 스레드에 맡긴다 (주문 저장이 끝난 뒤 부른다).
+
+        fresh_only: 최근 확인(캐시)을 쓰지 않고 요기요를 다시 연다 ("다시 확인", O-16).
+        """
         if not self.enabled or not candidates:
             return
-        _set_job(request_id, state="RUNNING", started_at=started_at, skipped=[], error=None)
-        self.executor.submit(self._run, request_id, list(candidates), message, started_at)
+        _set_job(
+            request_id,
+            state="RUNNING",
+            started_at=started_at,
+            started_mono=time.monotonic(),
+            seconds=None,
+            timing={},
+            skipped=[],
+            error=None,
+        )
+        self.executor.submit(
+            self._run, request_id, list(candidates), message, started_at, fresh_only
+        )
 
-    def _run(self, request_id: str, candidates: list[dict], message: str, started_at) -> None:
+    def _run(
+        self,
+        request_id: str,
+        candidates: list[dict],
+        message: str,
+        started_at,
+        fresh_only: bool = False,
+    ) -> None:
         try:
-            results = asyncio.run(self._check_all(candidates, message, started_at))
+            if self.cfg.mode == "real":
+                results = self.keeper.with_browser(
+                    lambda browser: self._check_all(
+                        candidates, message, started_at, browser, fresh_only
+                    ),
+                    headless=self.cfg.headless,
+                    browser_channel=self.cfg.browser_channel or None,
+                )
+            else:
+                results = asyncio.run(
+                    self._check_all(candidates, message, started_at, None, fresh_only)
+                )
+            timing = {
+                c["index"]: {"seconds": round(r.seconds, 2), "cached": r.cached}
+                for c, r in zip(candidates, results, strict=True)
+                if r.status != "SKIPPED"
+            }
+            _set_job(request_id, timing=timing, seconds=self._elapsed(request_id))
             skipped = [
                 c["index"]
                 for c, r in zip(candidates, results, strict=True)
@@ -175,9 +230,22 @@ class LiveCheckService:
             _set_job(request_id, state="DONE", skipped=skipped, stop_reason=reason)
         except Exception as exc:  # noqa: BLE001 — 브라우저를 못 띄워도 주문은 계속된다
             log.exception("요기요 실시간 확인 실패")
-            _set_job(request_id, state="DONE", error=f"{type(exc).__name__}: {exc}")
+            _set_job(
+                request_id,
+                state="DONE",
+                seconds=self._elapsed(request_id),
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
-    async def _check_all(self, candidates: list[dict], message: str, started_at) -> list:
+    @staticmethod
+    def _elapsed(request_id: str) -> float | None:
+        job = _job(request_id) or {}
+        start = job.get("started_mono")
+        return round(time.monotonic() - start, 2) if start is not None else None
+
+    async def _check_all(
+        self, candidates: list[dict], message: str, started_at, browser=None, fresh_only=False
+    ) -> list:
         targets = [target_of(c) for c in candidates]
         rank = {id(t): i for i, t in enumerate(targets)}
         locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -185,7 +253,7 @@ class LiveCheckService:
         async def with_cache(observe, t: CheckTarget) -> CheckResult:
             async with locks[t.restaurant_id]:  # 같은 식당이 두 후보에 있으면 한 번만 연다
                 t0 = time.monotonic()
-                row = self._fresh_row(t.restaurant_id, started_at)
+                row = self._fresh_row(t.restaurant_id, started_at, fresh_only)
                 if row is not None:
                     page, cached, err = row.page, True, row.error
                 else:
@@ -211,33 +279,39 @@ class LiveCheckService:
 
             return await run_checks(targets, lambda t: with_cache(fake, t), **opts)
 
-        from playwright.async_api import async_playwright
+        from app.modules.cart.yogiyo import DEMO_LOCATION, _init_script
+        from app.modules.livecheck import checker
 
-        from app.modules.cart.yogiyo import DEMO_LOCATION, _init_script, _launch
-        from app.modules.livecheck.checker import browser_checker
-
+        # 장바구니와 같은 브라우저에 확인용 창(context)을 하나 열고, 끝나면 그 창만 닫는다
         loc = json.loads(DEMO_LOCATION.read_text(encoding="utf-8"))
-        async with async_playwright() as p:
-            browser = await _launch(
-                p, headless=self.cfg.headless, channel=self.cfg.browser_channel or None
+        context = await browser.new_context(locale="ko-KR", viewport={"width": 1280, "height": 900})
+        try:
+            await context.add_init_script(_init_script(loc))
+            check = checker.browser_checker(
+                context, timeout_ms=int(self.cfg.timeout_seconds * 1000)
             )
+
+            async def real(t: CheckTarget):
+                r = await check(t)
+                return r.page, (r.reason if r.page is None else None)
+
+            return await run_checks(targets, lambda t: with_cache(real, t), **opts)
+        finally:
             try:
-                context = await browser.new_context(
-                    locale="ko-KR", viewport={"width": 1280, "height": 900}
-                )
-                await context.add_init_script(_init_script(loc))
-                check = browser_checker(context, timeout_ms=int(self.cfg.timeout_seconds * 1000))
-
-                async def real(t: CheckTarget):
-                    r = await check(t)
-                    return r.page, (r.reason if r.page is None else None)
-
-                return await run_checks(targets, lambda t: with_cache(real, t), **opts)
-            finally:
-                await browser.close()
+                await context.close()
+            except Exception:  # noqa: BLE001 — 사용자가 창을 먼저 닫은 경우
+                pass
 
     # ------------------------------------------------------------ 저장 (식당당 한 행)
-    def _fresh_row(self, restaurant_id: str, started_at: datetime) -> RestaurantLiveStatus | None:
+    def _since(self, started_at: datetime, fresh_only: bool) -> datetime:
+        """이 시각 이후의 확인만 이번 결과로 친다. real 모드는 15분 캐시 (다시 확인이면 제외)."""
+        if self.cfg.mode == "real" and not fresh_only:
+            return started_at - timedelta(minutes=self.cfg.cache_minutes)
+        return started_at
+
+    def _fresh_row(
+        self, restaurant_id: str, started_at: datetime, fresh_only: bool = False
+    ) -> RestaurantLiveStatus | None:
         """이번 작업에서 다시 쓸 수 있는 최근 확인. fake 결과는 다른 주문에 쓰지 않는다."""
         with self.sf() as s:
             row = s.get(RestaurantLiveStatus, restaurant_id)
@@ -245,10 +319,7 @@ class LiveCheckService:
                 return None
             if row.mode != self.cfg.mode:
                 return None
-            since = started_at
-            if self.cfg.mode == "real":
-                since = started_at - timedelta(minutes=self.cfg.cache_minutes)
-            if row.checked_at < since:
+            if row.checked_at < self._since(started_at, fresh_only):
                 return None
             s.expunge(row)
             return row
@@ -271,27 +342,34 @@ class LiveCheckService:
         return judge(t, observed_for(page, t))
 
     # ------------------------------------------------------------ 조회 (O-15)
-    def results(self, request_id: str, candidates: list[dict], started_at: datetime | None) -> list:
+    def results(
+        self,
+        request_id: str,
+        candidates: list[dict],
+        started_at: datetime | None,
+        fresh_only: bool = False,
+    ) -> list:
         job = _job(request_id) or {}
         out = []
         with self.sf() as s:
             for c in candidates:
                 t = target_of(c)
                 row = s.get(RestaurantLiveStatus, t.restaurant_id)
-                out.append(self._candidate_result(c, t, row, job, started_at))
+                out.append(self._candidate_result(c, t, row, job, started_at, fresh_only))
         return out
 
-    def _row_counts(self, row, started_at) -> bool:
+    def _row_counts(self, row, started_at, fresh_only: bool = False) -> bool:
         if row is None or row.checked_at is None or started_at is None or row.mode != self.cfg.mode:
             return False
-        since = started_at
-        if self.cfg.mode == "real" and row.page_status in VALID_PAGE:
-            since = started_at - timedelta(minutes=self.cfg.cache_minutes)
-        return row.checked_at >= since
+        if row.page_status not in VALID_PAGE:  # 차단·오류는 캐시로 치지 않는다
+            return row.checked_at >= started_at
+        return row.checked_at >= self._since(started_at, fresh_only)
 
-    def _candidate_result(self, c: dict, t: CheckTarget, row, job: dict, started_at) -> dict:
+    def _candidate_result(
+        self, c: dict, t: CheckTarget, row, job: dict, started_at, fresh_only: bool = False
+    ) -> dict:
         base = {"candidate_index": c["index"], "restaurant_id": t.restaurant_id}
-        if self._row_counts(row, started_at):
+        if self._row_counts(row, started_at, fresh_only):
             status, changes, reason = self._judge(t, row.page, row.error)
             if row.page_status in ("BLOCKED", "ERROR") and status not in ("BLOCKED", "ERROR"):
                 status = row.page_status
@@ -319,10 +397,16 @@ class LiveCheckService:
             status, reason = "SKIPPED", job.get("stop_reason")
         return {**base, "status": status, "changes": [], "reason": reason, "checked_at": None}
 
-    def view(self, request_id: str, candidates: list[dict], started_at: datetime | None) -> dict:
+    def view(
+        self,
+        request_id: str,
+        candidates: list[dict],
+        started_at: datetime | None,
+        fresh_only: bool = False,
+    ) -> dict:
         if not self.enabled:
             return {"mode": self.cfg.mode, "state": "OFF", "total": 0, "done": 0, "results": []}
-        results = self.results(request_id, candidates, started_at)
+        results = self.results(request_id, candidates, started_at, fresh_only)
         # 화면에 보일 후보: 고를 수 있는 후보가 want곳 나올 때까지 순위대로.
         # 주문 불가 후보는 숨기지 않고 제자리에 사유와 함께 보이되 고를 수 없다(selectable=False).
         selectable_shown = 0
@@ -331,6 +415,10 @@ class LiveCheckService:
             r["visible"] = selectable_shown < self.cfg.want
             selectable_shown += r["visible"] and r["selectable"]
         job = _job(request_id) or {}
+        timing = job.get("timing") or {}
+        for r in results:  # 확인에 걸린 시간, 최근 확인(캐시)을 다시 썼는지
+            t = timing.get(r["candidate_index"]) or {}
+            r["seconds"], r["cached"] = t.get("seconds"), t.get("cached")
         running = job.get("state") == "RUNNING" or any(r["status"] == "CHECKING" for r in results)
         finals = [r for r in results if r["status"] not in ("CHECKING",)]
         return {
@@ -344,18 +432,26 @@ class LiveCheckService:
             and not running
             and all(r["status"] == "UNAVAILABLE" for r in results),
             "started_at": started_at.isoformat() if started_at else None,
+            # 확인 시작부터 끝까지 걸린 시간(초). 진행 중이면 지금까지
+            "seconds": job.get("seconds") if not running else self._elapsed(request_id),
             "results": results,
         }
 
     # ------------------------------------------------------------ 후보 선택 때 판정 (O-02)
     def verdict(
-        self, request_id: str, candidate: dict, started_at, *, wait_seconds: float | None = None
+        self,
+        request_id: str,
+        candidate: dict,
+        started_at,
+        *,
+        fresh_only: bool = False,
+        wait_seconds: float | None = None,
     ) -> dict:
         """선택한 후보의 판정. 확인 중이면 끝날 때까지 잠깐 기다린다."""
         wait = self.cfg.timeout_seconds + 2 if wait_seconds is None else wait_seconds
         deadline = time.monotonic() + wait
         while True:
-            r = self.results(request_id, [candidate], started_at)[0]
+            r = self.results(request_id, [candidate], started_at, fresh_only)[0]
             if r["status"] != "CHECKING" or time.monotonic() >= deadline:
                 return r
             time.sleep(0.25)

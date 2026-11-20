@@ -88,6 +88,21 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 - 모드는 `.env`의 `LIVE_CHECK_MODE`로 고른다. `fake`(기본)는 주문 문장 태그 `#요기요닫힘` `#요기요가격변경` `#요기요전부닫힘`으로 시연한다.
 - 서버 없이 확인 도구만 돌리기: `uv run python scripts/yogiyo_cart_try.py --check 20 --want 20`
 
+### 로컬에서 진짜 요기요로 시연하기 (real 모드)
+
+`.env`에 두 줄을 넣고 백엔드를 재시작한다. 따로 설치할 것은 없다 (크로미움은 첫 실행 때 자동 설치).
+
+```
+LIVE_CHECK_MODE=real
+YOGIYO_CART_MODE=real
+```
+
+- 후보 화면이 뜨면 요기요 창이 열려 탭 최대 3개로 후보 식당을 확인하고, 확인용 창은 끝나면 닫힌다.
+- 실시간 확인과 장바구니 담기는 같은 브라우저를 쓴다. 요기요 창이 겹쳐 뜨지 않고, 열어 둔 장바구니 창은 그대로 둔다.
+- 15분 안에 같은 식당을 다시 추천하면 요기요를 다시 열지 않고 최근 확인을 쓴다. 후보 화면의 "다시 확인"은 이 캐시를 무시한다.
+- O-15 응답의 `seconds`(전체 확인 시간), 후보별 `seconds`·`cached`로 걸린 시간과 캐시 사용 여부를 볼 수 있다.
+- 창 없는(headless) 브라우저는 요기요가 막는다. `YOGIYO_CART_HEADLESS=0`(기본)을 바꾸지 않는다.
+
 ## C(혜택)와 함께 확인
 
 ```bash
