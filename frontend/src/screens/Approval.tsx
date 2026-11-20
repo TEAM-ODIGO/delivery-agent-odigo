@@ -46,9 +46,12 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
   const cart = useYogiyoCart(view.request_id);
   const starting = useIsMutating({ mutationKey: ["yogiyo-cart-start", view.request_id] }) > 0;
   const cartBlock = cartBlockReason(cart.data, starting);
+  // NFC 태그는 카드 결제일 때만 받는다. 지역화폐 단독 결제는 카드가 없으니 태그 없이 바로 결제하고,
+  // 잔액이 모자라면 E가 INSUFFICIENT_BALANCE로 거절한다. (분할결제는 payment_method가 나머지를 낼 카드라 태그 필요)
+  const needsTap = NFC_PAY && order.payment_method.type !== "LOCAL_CURRENCY";
 
   async function approve() {
-    if (!NFC_PAY) {
+    if (!needsTap) {
       send({ type: "APPROVE" });
       return;
     }
@@ -103,7 +106,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
             </Button>
           )}
           <Button onClick={approve} disabled={busy || expired || !!cartBlock || waiting}>
-            {busy ? "결제 요청 중…" : waiting ? "카드를 대 주세요…" : NFC_PAY ? "승인하고 카드 태그" : "승인하고 결제"}
+            {busy ? "결제 요청 중…" : waiting ? "카드를 대 주세요…" : needsTap ? "승인하고 카드 태그" : "승인하고 결제"}
           </Button>
         </>
       }
@@ -183,7 +186,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
       )}
       {tapError && <Banner tone="bad">{tapError}</Banner>}
       <p className="faint">
-        {NFC_PAY
+        {needsTap
           ? "카드를 태그하면 바로 결제가 시작되고, 그 뒤에는 취소할 수 없어요."
           : "승인하면 바로 결제가 시작되고, 그 뒤에는 취소할 수 없어요."}
       </p>

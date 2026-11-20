@@ -17,6 +17,9 @@ RULE_VERSIONS: dict[str, list[BenefitRule]] = {
                     min_performance_krw=300000, monthly_cap_krw=10000),
         BenefitRule("RULE-CARD-B-RATE", "PRD-CARD-B", discount_percent=3, max_discount_krw=3000,
                     min_performance_krw=500000, monthly_cap_krw=10000),
+        # 가상카드 C: 배달 주문 10% 할인(최대 2천원), 최소 주문 1만2천원, 실적 조건 없음, 월 6천원 한도
+        BenefitRule("RULE-CARD-C-DELIVERY", "PRD-CARD-C", discount_percent=10, max_discount_krw=2000,
+                    min_order_krw=12000, monthly_cap_krw=6000),
         BenefitRule("RULE-LOCAL-A-DISCOUNT", "PRD-LOCAL-A", discount_percent=5, monthly_cap_krw=15000),
     ],
 }
@@ -34,9 +37,9 @@ RESTAURANTS = {
 DEFAULT_RESTAURANTS = dict(RESTAURANTS)
 
 # 이번 달 이미 받은 혜택 금액. E-11 응답에는 이 값이 없어서 임시로 C에 둔다. (협의 필요)
-BENEFIT_USED_KRW = {"CARD001": 2000, "CARD002": 0, "LOCAL001": 0}
+BENEFIT_USED_KRW = {"CARD001": 2000, "CARD002": 0, "CARD003": 0, "LOCAL001": 0}
 
-PRODUCT_TYPES = {"PRD-CARD-A": "CARD", "PRD-CARD-B": "CARD", "PRD-LOCAL-A": "LOCAL_CURRENCY"}
+PRODUCT_TYPES = {"PRD-CARD-A": "CARD", "PRD-CARD-B": "CARD", "PRD-CARD-C": "CARD", "PRD-LOCAL-A": "LOCAL_CURRENCY"}
 
 
 # ---------- 테스트·재시작용 초기 상태 ----------

@@ -304,7 +304,7 @@ def test_fep_unavailable_is_503(make):
 # ---------------- E-11 ----------------
 def test_e11_shape_filter_and_errors(client):
     j = client.get("/internal/payment-methods", params={"user_id": "U001"}, headers=H).json()
-    assert j["user_id"] == "U001" and j["count"] == 3 and j["mock"] is True
+    assert j["user_id"] == "U001" and j["count"] == 4 and j["mock"] is True  # CARD001·CARD002·CARD003·LOCAL001
     card = next(m for m in j["results"] if m["payment_method_id"] == "CARD001")
     assert set(card) == {"payment_method_id", "product_id", "type", "name", "monthly_performance_krw", "status", "updated_at"}
     local = next(m for m in j["results"] if m["payment_method_id"] == "LOCAL001")
