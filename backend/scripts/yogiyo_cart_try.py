@@ -8,6 +8,8 @@
 
 실행:
     uv run python scripts/yogiyo_cart_try.py --find-open         # 지금 열린 식당을 찾아 담기
+    uv run python scripts/yogiyo_cart_try.py --check             # 상위 6곳 확인만 (담지 않음)
+    uv run python scripts/yogiyo_cart_try.py --check 20 --want 20  # 20곳 모두 확인 (실측용)
     uv run python scripts/yogiyo_cart_try.py --check-only        # 기본 식당 페이지가 열리는지만
     uv run python scripts/yogiyo_cart_try.py                     # 기본 식당·메뉴 담기
 (창 없는 --headless 는 요기요가 Access Denied로 막는다)
@@ -24,6 +26,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # backend/ 를 import 경로에 추가
 
 from app.modules.cart.yogiyo import CartItem, CartOrder, fill_cart_sync  # noqa: E402
+from app.modules.livecheck.checker import (  # noqa: E402
+    CheckItem,
+    CheckTarget,
+    check_restaurants_sync,
+)
 
 DATA = Path(__file__).resolve().parents[1] / "data"
 
@@ -83,6 +90,71 @@ def _find_open(limit: int, chrome: bool, out: str, headless: bool):
     return None
 
 
+def _int(v: str | None) -> int | None:
+    return int(v) if v and v.isdigit() else None
+
+
+def _run_check(n: int, want: int, concurrency: int, chrome: bool, out: str, headless: bool) -> int:
+    """수집 데이터 상위 n곳을 요기요에서 확인만 한다 (장바구니에 담지 않음). 실측 기록을 남긴다."""
+    import time
+    from datetime import datetime
+
+    picked = _candidates()[:n]
+    targets = [
+        CheckTarget(
+            restaurant_id=r["식당id"],
+            name=r["식당명"],
+            items=[CheckItem(m["메뉴id"], _int(m["판매가"]), m["메뉴명"])],
+            expected_delivery_fee_krw=_int(r.get("기본배달비")),
+            expected_min_order_krw=_int(r.get("최소주문금액")),
+        )
+        for r, m in picked
+    ]
+    print(f"{len(targets)}곳 확인 (동시 {concurrency}탭, 통과 {want}곳이면 멈춤)")
+
+    def show(i: int, res) -> None:
+        t = targets[i]
+        detail = "; ".join(res.changes) or res.reason or ""
+        print(f"[{i + 1}] {t.name} ({t.restaurant_id}): {res.status} {res.seconds:.1f}초 {detail}")
+
+    started = time.monotonic()
+    results = check_restaurants_sync(
+        targets,
+        concurrency=concurrency,
+        want=want,
+        headless=headless,
+        browser_channel="chrome" if chrome else None,
+        on_result=show,
+    )
+    total = time.monotonic() - started
+    counts: dict[str, int] = {}
+    for res in results:
+        counts[res.status] = counts.get(res.status, 0) + 1
+    print(f"끝: {total:.1f}초 · " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+
+    Path(out).mkdir(parents=True, exist_ok=True)
+    path = Path(out) / f"check-{datetime.now():%Y%m%d-%H%M}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "total_seconds": round(total, 1),
+                "concurrency": concurrency,
+                "want": want,
+                "results": [
+                    {"name": t.name, **json.loads(res.to_json())}
+                    for t, res in zip(targets, results, strict=True)
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"기록: {path}")
+    return 0 if any(res.status in ("OK", "CHANGED") for res in results) else 1
+
+
 def _item(text: str) -> CartItem:
     menu, _, qty = text.partition(":")
     return CartItem(menu_id=menu, quantity=int(qty or 1))
@@ -112,7 +184,20 @@ def main() -> int:
         metavar="N",
         help="수집 데이터에서 지금 열린 식당을 최대 N곳(기본 20) 찾아 그 식당으로 담는다",
     )
+    p.add_argument(
+        "--check",
+        nargs="?",
+        const=6,
+        type=int,
+        metavar="N",
+        help="수집 데이터 상위 N곳(기본 6)이 지금 주문 가능한지 확인만 한다 (담지 않음)",
+    )
+    p.add_argument("--want", type=int, default=3, help="--check: 통과가 이만큼이면 멈춘다")
+    p.add_argument("--concurrency", type=int, default=3, help="--check: 동시에 여는 탭 수")
     a = p.parse_args()
+
+    if a.check:
+        return _run_check(a.check, a.want, a.concurrency, a.chrome, a.out, a.headless)
 
     if a.find_open:
         found = _find_open(a.find_open, a.chrome, a.out, a.headless)
