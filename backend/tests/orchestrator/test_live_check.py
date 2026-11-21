@@ -205,17 +205,24 @@ def test_real_cache_window(env):
     assert live._fresh_row("R-fake", now) is None  # fake 결과는 real에 안 씀
 
 
-def test_target_uses_catalog_base_fee():
+def test_target_uses_catalog_base_fee(tmp_path, monkeypatch):
+    from app.modules.livecheck import catalog
     from app.modules.livecheck.service import target_of
 
-    t = target_of(
-        {
-            "restaurant": {"restaurant_id": "355987", "name": "써브웨이", "delivery_fee_krw": 0},
-            "items": [{"menu_id": "845312757", "name": "칩", "unit_price_krw": 2100}],
-        }
-    )
+    # 실제 CSV는 재수집(scripts/recollect_catalog.py)으로 값이 바뀌므로 테스트용 CSV를 쓴다
+    csv_path = tmp_path / "1_식당.csv"
+    csv_path.write_text("식당id,기본배달비,최소주문금액\n355987,3400,14000\n", encoding="utf-8-sig")
+    monkeypatch.setattr(catalog, "DATA", csv_path)
+    catalog._rows.cache_clear()
+    try:
+        restaurant = {"restaurant_id": "355987", "name": "써브웨이", "delivery_fee_krw": 0}
+        items = [{"menu_id": "845312757", "name": "칩", "unit_price_krw": 2100}]
+        t = target_of({"restaurant": restaurant, "items": items})
+    finally:
+        catalog._rows.cache_clear()
     assert isinstance(t, CheckTarget) and t.items == [CheckItem("845312757", 2100, "칩")]
     assert t.expected_delivery_fee_krw == 3400  # 후보의 구간 배달비가 아니라 CSV 기본 배달비
+    assert t.expected_min_order_krw == 14000
 
 
 # ---------------------------------------------------------------- API (O-15 · O-16)
