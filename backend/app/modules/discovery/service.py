@@ -362,6 +362,8 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
         })
 
     bodies, suggestions = search(db, request.constraints, top_n, now=filter_now())
+    # 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 그 이유 (이슈 #37, 화면 위 안내)
+    notice = bodies[0].pop("search_notice", None) if bodies else None
 
     # 선택 사항: LLM으로 첫 문장을 다듬는다. 실패하면 기본 문장 그대로
     facts = [" ".join(body["reasons"]) for body in bodies]
@@ -403,6 +405,7 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
         "constraints_version": request.constraints_version,
         "candidates": [_candidate_json(c) for c in candidates],
         "relaxation_suggestions": suggestions,
+        "search_notice": notice,
     }
 
 

@@ -261,6 +261,7 @@ class FakeDiscovery:
             "status": r.status,
             "candidates": copy.deepcopy(r.candidates),
             "relaxation_suggestions": [],
+            "search_notice": None,
         }
 
     @staticmethod

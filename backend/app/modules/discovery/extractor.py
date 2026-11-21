@@ -325,9 +325,13 @@ def normalize_cuisine(value: str | None) -> str | None:
 
 
 def find_menu_keywords(text: str) -> list[str]:
+    """문장에 나온 메뉴 단어. 더 긴 단어의 일부면 빼고(타코야끼의 '타코'), 같은 뜻 표기는 하나만 둔다."""
+    found = [keyword for keyword in DISH_KEYWORDS if keyword in text]
     result = []
-    for keyword in DISH_KEYWORDS:
-        if keyword in text and keyword not in result:
+    for keyword in found:
+        if any(keyword != other and keyword in other for other in found):
+            continue
+        if keyword not in result:
             result.append(keyword)
     return result
 

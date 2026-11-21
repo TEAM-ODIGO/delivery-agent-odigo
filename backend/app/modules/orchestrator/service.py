@@ -938,7 +938,10 @@ class OrchestratorService:
         found = self._call(run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n}))
         cands = [{**c, "index": i} for i, c in enumerate(found.get("candidates", []))]
         cands = self._mark_min_order(run, cands, a["constraints"])
-        self._set_ctx(run, candidates=cands, tried_candidate_ids=[])
+        # 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 A가 주는 이유 (이슈 #37, 후보 화면 위 안내)
+        self._set_ctx(
+            run, candidates=cands, tried_candidate_ids=[], search_notice=found.get("search_notice")
+        )
         if self.live and cands:
             self._start_live_check(run)
         if not cands:
@@ -1599,6 +1602,7 @@ class OrchestratorService:
     def _candidate_prompt(self, run: Run) -> dict:
         return {
             "type": "SELECT_CANDIDATE",
+            "search_notice": run.context.get("search_notice"),
             "candidates": [
                 {
                     "index": c["index"],
@@ -1611,6 +1615,10 @@ class OrchestratorService:
                     # 최소주문금액 미달이면 선택할 수 없다 (로컬 확장)
                     "orderable": not c.get("min_order"),
                     "min_order": c.get("min_order"),
+                    # 비슷한 메뉴로 고른 후보 (이슈 #37): {"level", "label"}
+                    "match": c.get("match"),
+                    # 조건에 맞는 가게가 모자라 채운 근접 후보 (이슈 #37): 화면은 '더 보기'로 접는다
+                    "near_miss_fill": bool(c.get("near_miss_fill")),
                     # 화면(와이어프레임 v0.3 03)이 보여 주는 값. A 후보에 있는 것만 그대로 전달한다
                     "restaurant": {
                         k: c["restaurant"].get(k)
