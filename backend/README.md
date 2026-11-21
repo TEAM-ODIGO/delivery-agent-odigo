@@ -118,6 +118,24 @@ A-05는 `data/1_식당.csv`의 `영업시간` 열(예: `17:00 ~ 03:00`)을 보�
   서버를 다시 켜면 CSV의 영업시간이 DB(`restaurant.opening_hours`)에 반영된다. 예전 DB에는 열이 자동으로 추가된다.
 - 시간과 상관없이 시연하려면 `.env`에 `DISCOVERY_OPENING_HOURS_FILTER=0` (테스트는 기본으로 끔).
 
+## 시연 전 데이터 새로 고치기 (식당·메뉴 재수집)
+
+`data/1_식당.csv`, `data/2_메뉴.csv`는 11/11 수집본이다. 시연 전에 요기요에서 가격·품절·배달비·최소 주문 금액·영업시간을 다시 읽어 맞춘다.
+창이 뜨는 브라우저로 식당 158곳을 연다 (탭 3개, 2~3분). 장바구니에는 담지 않는다.
+
+```bash
+uv run python scripts/recollect_catalog.py --collect --limit 5    # 시험: 5곳만 읽고 보고서만
+uv run python scripts/recollect_catalog.py --collect              # 전부 읽고 바뀐 점만 보기 (CSV 안 바꿈)
+uv run python scripts/recollect_catalog.py --from latest --write  # 방금 읽은 결과를 CSV에 씀 (다시 안 읽음)
+```
+
+- 결과: `cart_runs/recollect-20261121-1155.json` 같은 파일(읽은 원본), `cart_runs/recollect-날짜-report.md`(식당별 바뀐 점).
+- 식당을 80% 미만 읽었으면 쓰지 않는다. 못 읽은 식당은 기존 줄을 그대로 둔다.
+- 사라진 메뉴는 지우지 않고 품절로 표시한다. 같은 이름이 새 메뉴 번호로 생겼으면 번호만 바꾼다.
+- 새 메뉴는 유형(본메뉴·사이드)·맵기 같은 분류 값이 없어 추가하지 않고 보고서에만 남긴다.
+- 쓰기 전 원래 CSV는 `cart_runs/catalog-backup-날짜/`에 복사된다. 바뀐 줄만 바뀐다 (`git diff data/`로 확인).
+- 서버를 다시 켜면 CSV의 수집시각이 DB보다 새로우므로 DB가 CSV에 맞춰진다 (C-08이 쓰는 지역화폐 열은 그대로).
+
 ## C(혜택)와 함께 확인
 
 ```bash

@@ -1,6 +1,8 @@
 """요기요 수집 CSV → restaurant·menu 테이블 (A·B·C가 함께 읽는 공용 읽기 전용 데이터).
 
 - 서버가 시작될 때 restaurant 테이블이 비어 있으면 data/ 의 CSV를 한 번 적재한다 (load_if_empty).
+- 이미 들어 있어도 CSV의 수집시각이 DB보다 새로우면 CSV에 맞춘다
+  (sync_if_newer: 재수집한 뒤 서버를 다시 켤 때).
 - 직접 다시 적재하려면: uv run python -m app.modules.discovery.loader
 - 같은 ID는 덮어쓴다(다시 돌려도 안전). SQLite·PostgreSQL 모두 동작.
 - MVP 1 지역화폐 규칙: 요기요 '지원금 현장결제 가능' 값을 local_currency_merchant에 추정값으로
@@ -153,6 +155,61 @@ def load_if_empty(session: Session) -> tuple[int, int] | None:
         log.warning("식당·메뉴 CSV를 찾지 못해 적재하지 않았습니다: %s (%s, %s 필요)", DATA_DIR, RESTAURANT_CSV, MENU_CSV)
         return None
     return load_csv(session, r, m)
+
+
+# C-08만 쓰는 열: 다시 맞출 때 건드리지 않는다
+_KEEP_ON_SYNC = {"local_currency_merchant", "local_currency_basis", "local_currency_checked_at"}
+
+
+def sync_if_newer(session: Session) -> tuple[int, int, int] | None:
+    """CSV가 DB보다 새로 수집됐으면(수집시각 기준) DB를 CSV에 맞춘다.
+
+    돌려주는 값: (식당 수, 메뉴 수, 품절 처리한 메뉴 수). 새롭지 않으면 None.
+
+    scripts/recollect_catalog.py --write 로 CSV를 고친 뒤 서버를 다시 켜면 여기서 반영된다.
+    - 같은 ID는 값을 고치고, 새 ID는 넣는다.
+    - CSV에 있는 식당의 메뉴인데 CSV에서 빠진 것(메뉴 번호가 바뀐 옛 줄)은 지우지 않고 품절로 둔다.
+    """
+    r, m = _find_csv(RESTAURANT_CSV), _find_csv(MENU_CSV)
+    if r is None or m is None:
+        return None
+    restaurants = read_restaurants(r)
+    csv_latest = max((x["collected_at"] for x in restaurants if x["collected_at"]), default=None)
+    db_latest = session.scalar(select(func.max(Restaurant.collected_at)))
+    if csv_latest is None or db_latest is None or csv_latest <= db_latest:
+        return None
+    existing = {x.restaurant_id: x for x in session.scalars(select(Restaurant))}
+    for row in restaurants:
+        obj = existing.get(row["restaurant_id"])
+        if obj is None:
+            session.add(Restaurant(**row))
+            continue
+        for key, value in row.items():
+            if key not in _KEEP_ON_SYNC:
+                setattr(obj, key, value)
+    session.flush()
+    ids = {x["restaurant_id"] for x in restaurants}
+    menus, _ = read_menus(m, ids)
+    in_csv = select(Menu).where(Menu.restaurant_id.in_(ids))
+    db_menus = {x.menu_id: x for x in session.scalars(in_csv)}
+    for row in menus:
+        obj = db_menus.pop(row["menu_id"], None)
+        if obj is None:
+            session.add(Menu(**row))
+        else:
+            for key, value in row.items():
+                setattr(obj, key, value)
+    gone = 0
+    for obj in db_menus.values():  # CSV에서 빠진 메뉴
+        if not obj.is_sold_out:
+            obj.is_sold_out = True
+            gone += 1
+    session.commit()
+    log.info(
+        "식당·메뉴를 새 CSV(%s 수집)에 맞췄습니다: 식당 %d곳, 메뉴 %d개, 빠진 메뉴 품절 %d개",
+        csv_latest, len(restaurants), len(menus), gone,
+    )
+    return len(restaurants), len(menus), gone
 
 
 def find_restaurant_csv() -> Path | None:

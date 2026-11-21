@@ -21,12 +21,17 @@ from app.modules.benefit.router import router as benefit_router
 from app.modules.delegation.router import router as delegation_router
 from app.modules.discovery.hours import ensure_column as ensure_hours_column
 from app.modules.discovery.hours import sync_from_csv as sync_hours
-from app.modules.discovery.loader import find_restaurant_csv, load_if_empty
+from app.modules.discovery.loader import find_restaurant_csv, load_if_empty, sync_if_newer
 from app.modules.discovery.router import router as discovery_router
 from app.modules.orchestrator.router import router as orchestrator_router
 from app.modules.ordering.router import router as ordering_router
 
 log = logging.getLogger("app")
+if not log.handlers:  # 따로 설정이 없으면 "app" 로그(INFO)도 uvicorn 로그처럼 터미널에 보이게
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    log.addHandler(_handler)
+    log.setLevel(logging.INFO)
 
 
 def reconcile_once() -> dict:
@@ -52,7 +57,8 @@ def prepare_catalog() -> None:
         return  # 가짜 식당(app/fakes/catalog.py)을 쓰는 구성
     ensure_hours_column(engine)  # 예전 DB에 영업시간 열 추가
     with SessionLocal() as s:
-        load_if_empty(s)
+        if load_if_empty(s) is None:
+            sync_if_newer(s)  # 재수집한 CSV가 더 새로우면 DB에 맞춤
         sync_hours(s, find_restaurant_csv())  # CSV의 영업시간을 DB에 맞춤
     use_db_restaurants(SessionLocal)
 
