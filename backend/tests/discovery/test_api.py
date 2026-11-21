@@ -139,7 +139,8 @@ def test_full_flow_clarify_search_select(client, create):
     # 피자 가게(R4)·매운 메뉴(M12)·주류(M13)는 나오지 않는다
     ids = [c["restaurant"]["restaurant_id"] for c in result["candidates"]]
     assert "R4" not in ids
-    assert "R2" not in ids  # 58분이라 조건 위반 (모두 만족하는 후보가 있으면 근접 후보는 안 보여 줌)
+    # R2는 58분이라 조건(40분) 위반. 맞는 가게가 모자랄 때 채우는 근접 후보는 30% 이내만이라 나오지 않는다 (이슈 #37)
+    assert "R2" not in ids
 
     # 근접 후보로 풀 수 있는 조건을 알려 준다
     slots = [s["slot"] for s in result["relaxation_suggestions"]]
