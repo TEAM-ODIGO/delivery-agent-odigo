@@ -9,12 +9,15 @@ from .errors import AppError
 
 MOCK_USERS = {
     "U001": [
-        PaymentMethod("CARD001", "PRD-CARD-A", "CARD", "가상카드 A", monthly_performance_krw=350000),
-        PaymentMethod("CARD002", "PRD-CARD-B", "CARD", "가상카드 B", monthly_performance_krw=120000),
+        PaymentMethod("CARD001", "PRD-CARD-A", "CARD", "요기요 신한카드 체크",
+                      monthly_performance_krw=350000),
+        PaymentMethod("CARD002", "PRD-CARD-B", "CARD", "신한카드 구독 좋아요",
+                      monthly_performance_krw=120000),
         PaymentMethod("LOCAL001", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", balance_krw=120000),
     ],
     "U002": [
-        PaymentMethod("CARD101", "PRD-CARD-A", "CARD", "가상카드 A", monthly_performance_krw=100000),
+        PaymentMethod("CARD101", "PRD-CARD-A", "CARD", "요기요 신한카드 체크",
+                      monthly_performance_krw=100000),
         PaymentMethod("LOCAL101", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", balance_krw=1000),
     ],
 }

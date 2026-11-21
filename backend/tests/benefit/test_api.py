@@ -129,7 +129,8 @@ def test_c02_보유_결제수단_조회(client, svc):
     d = client.get("/benefit/users/U001/payment-methods", headers=svc).json()
     assert d["count"] == 3
     card, local = d["results"][0], d["results"][2]
-    assert card["monthly_performance_krw"] == 350000 and card["monthly_benefit_remaining_krw"] == 8000
+    assert card["monthly_performance_krw"] == 350000
+    assert card["monthly_benefit_remaining_krw"] == 4000  # 월 한도 6,000원 - 이미 받은 2,000원
     assert local["balance_krw"] == 120000 and local["monthly_benefit_remaining_krw"] == 15000
     assert card["product_id"] == "PRD-CARD-A"
     only_local = client.get("/benefit/users/U001/payment-methods?type=LOCAL_CURRENCY", headers=svc).json()
@@ -170,10 +171,11 @@ def test_관리자_조회_API(client, admin):
     d = client.get("/benefit/local-currency/restaurants/STORE101", headers=admin).json()
     assert d["local_currency_merchant"] is True and d["local_currency_basis"] == "ASSUMED_FROM_VOUCHER"
     rules = client.get("/benefit/rules?product_id=PRD-CARD-A", headers=admin).json()
-    assert rules["count"] == 1 and rules["results"][0]["conditions"]["min_order_krw"] == 15000
+    assert rules["count"] == 1
+    assert rules["results"][0]["conditions"] == {"min_performance_krw": 200000}
     assert "evidence" not in rules["results"][0]["source"]
     detail = client.get("/benefit/rules/RULE-CARD-A-DELIVERY", headers=admin).json()
-    assert detail["source"]["evidence"].startswith("배달앱 결제 시")
+    assert detail["source"]["evidence"].startswith("배달앱(요기요) 결제 시")
     assert client.get("/benefit/rules/NOPE", headers=admin).status_code == 404
 
 
@@ -186,7 +188,8 @@ def test_e11_응답을_결제수단으로_변환():
     def handler(request):
         assert request.url.params["user_id"] == "U001" and request.headers["authorization"] == "Bearer tok"
         return httpx.Response(200, json={"user_id": "U001", "count": 1, "results": [
-            {"payment_method_id": "CARD001", "product_id": "PRD-CARD-A", "type": "CARD", "name": "가상카드 A",
+            {"payment_method_id": "CARD001", "product_id": "PRD-CARD-A", "type": "CARD",
+             "name": "요기요 신한카드 체크",
              "monthly_performance_krw": 350000, "status": "ACTIVE"}]})
     m = _ledger(handler).get_payment_methods("U001", "REQ001")[0]
     assert (m.payment_method_id, m.product_id, m.monthly_performance_krw) == ("CARD001", "PRD-CARD-A", 350000)
@@ -229,7 +232,7 @@ def test_명세_예시_응답_형태(client, svc, admin):
             "candidate_payment_method_ids": ["CARD001", "LOCAL001"]}
     d = client.post("/benefit/recommendations", json=body, headers=svc).json()
     assert d["mock"] is True and list(d["options"][0])[0] == "rank"
-    assert d["options"][0]["reasons"] == ["배달앱 결제 즉시할인 2,000원"]
+    assert d["options"][0]["reasons"] == ["배달앱 결제 즉시할인 15%"]
     assert d["options"][1]["reasons"] == ["지역화폐 즉시할인 5% (가맹점 여부는 추정)"]
     assert d["options"][1]["instant_discount_krw"] == 1000 and d["options"][1]["charge_krw"] == 19000
     assert client.get("/benefit/local-currency/restaurants/STORE101", headers=admin).json() == {
@@ -242,15 +245,54 @@ def test_명세_예시_응답_형태(client, svc, admin):
 def test_최소주문금액_사전_확인(client):
     from app.modules.benefit import facade
 
+    # 최소 주문이 있는 카드는 Deep On Platinum+(CARD003, 2만원)뿐이라 E 원장으로 확인한다.
+    def handler(request):
+        return httpx.Response(200, json={"results": [
+            {"payment_method_id": "CARD003", "product_id": "PRD-CARD-C", "type": "CARD",
+             "name": "신한카드 Deep On Platinum+", "monthly_performance_krw": 350000,
+             "status": "ACTIVE"},
+            {"payment_method_id": "LOCAL001", "product_id": "PRD-LOCAL-A", "type": "LOCAL_CURRENCY",
+             "balance_krw": 120000, "status": "ACTIVE"}]})
+    ledger.set_ledger(_ledger(handler))
     body = {
         "user_id": "U001", "request_id": "REQ001",
-        "candidate_payment_method_ids": ["CARD001", "LOCAL001"],
+        "candidate_payment_method_ids": ["CARD003", "LOCAL001"],
         "orders": [
-            {"restaurant_id": "STORE102", "order_krw": 13000},  # 지역화폐 불가 가게, 카드 최소 15,000원
-            {"restaurant_id": "STORE102", "order_krw": 15000},
+            {"restaurant_id": "STORE102", "order_krw": 13000},  # 지역화폐 불가, 카드 최소 2만원
+            {"restaurant_id": "STORE102", "order_krw": 20000},
             {"restaurant_id": "STORE101", "order_krw": 13000},  # 지역화폐 가맹 → 결제 가능
             {"restaurant_id": "NOWHERE", "order_krw": 1000},  # 모르는 식당은 판단하지 않음
         ],
     }
     got = [r["required_order_krw"] for r in facade.check_min_order(body)["results"]]
-    assert got == [15000, None, None, None]
+    assert got == [20000, None, None, None]
+
+
+# ---------- 실제 신한카드 3장의 규칙 값 ----------
+def test_신한카드_3장_규칙_값():
+    from app.modules.benefit import seed
+    from app.modules.benefit.domain import PaymentMethod, calculate
+
+    rules = {r.product_id: r for r in seed.RULE_VERSIONS["BEN-V1"]}
+    shop = seed.RESTAURANTS["STORE101"]
+    a = PaymentMethod("CARD001", "PRD-CARD-A", "CARD", monthly_performance_krw=350000)
+    b = PaymentMethod("CARD002", "PRD-CARD-B", "CARD", monthly_performance_krw=550000)
+    c = PaymentMethod("CARD003", "PRD-CARD-C", "CARD", monthly_performance_krw=350000)
+
+    # 요기요 신한카드 체크: 15%, 건당 최대 2,000원, 최소 주문 없음
+    assert calculate(a, rules["PRD-CARD-A"], 10000, shop).instant_discount_krw == 1500
+    assert calculate(a, rules["PRD-CARD-A"], 30000, shop).instant_discount_krw == 2000
+    # 신한카드 구독 좋아요: 10%, 월 한도 2,000원 (남은 한도 500원이면 500원)
+    assert calculate(b, rules["PRD-CARD-B"], 15000, shop).instant_discount_krw == 1500
+    assert calculate(b, rules["PRD-CARD-B"], 15000, shop, used_krw=1500).instant_discount_krw == 500
+    # Deep On Platinum+: 20%, 건당 최대 10,000원, 최소 주문 20,000원
+    assert calculate(c, rules["PRD-CARD-C"], 19999, shop).reason_codes == ["MIN_ORDER_NOT_MET"]
+    assert calculate(c, rules["PRD-CARD-C"], 20000, shop).instant_discount_krw == 4000
+    assert calculate(c, rules["PRD-CARD-C"], 60000, shop).instant_discount_krw == 10000
+    # 전월 실적 미달이면 제외 (A 20만원, B 40만원, C 30만원)
+    assert calculate(PaymentMethod("X", "PRD-CARD-A", "CARD", monthly_performance_krw=199999),
+                     rules["PRD-CARD-A"], 20000, shop).reason_codes == ["PERFORMANCE_NOT_MET"]
+    assert calculate(PaymentMethod("X", "PRD-CARD-B", "CARD", monthly_performance_krw=399999),
+                     rules["PRD-CARD-B"], 20000, shop).reason_codes == ["PERFORMANCE_NOT_MET"]
+    assert calculate(PaymentMethod("X", "PRD-CARD-C", "CARD", monthly_performance_krw=299999),
+                     rules["PRD-CARD-C"], 20000, shop).reason_codes == ["PERFORMANCE_NOT_MET"]
