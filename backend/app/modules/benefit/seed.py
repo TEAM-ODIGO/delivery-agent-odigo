@@ -5,21 +5,59 @@ from .domain import BenefitRule, Restaurant
 
 CURRENT_VERSION = "BEN-V1"
 
+_SHINHAN = "https://www.shinhancard.com/pconts/html/card/apply"
+
+# 출처는 신한카드 공식 카드 안내 페이지(2026-11-20 확인).
+# 규칙 모델로 표현하지 못한 조건(횟수 제한 등)은 evidence에 적어 둔다.
 SOURCES = {
-    "RULE-CARD-A-DELIVERY": {"document_id": "DOC-PRD-CARD-A-2026", "title": "가상카드 A 상품설명서", "page": 3,
-                             "evidence": "배달앱 결제 시 2천원 즉시할인(전월 실적 30만원 이상, 월 1만원 한도)"},
+    "RULE-CARD-A-DELIVERY": {
+        "document_id": "DOC-PRD-CARD-A-2026",
+        "title": "요기요 신한카드 체크 카드 안내 (신한카드 공식)",
+        "page": 1,
+        "evidence": (
+            "배달앱(요기요) 결제 시 15% 할인(하루 1회·건당 최대 2,000원, 전월 실적 20만원 이상, "
+            "월 한도 6,000원). 월 횟수 제한은 규칙 모델에 없어 반영하지 않음. 신규 발급 중단 카드. "
+            f"{_SHINHAN}/check/1188364_2206.html"
+        ),
+    },
+    "RULE-CARD-B-RATE": {
+        "document_id": "DOC-PRD-CARD-B-2026",
+        "title": "신한카드 구독 좋아요 카드 안내 (신한카드 공식)",
+        "page": 1,
+        "evidence": (
+            "배달앱 앱 내 카드결제 시 10% 할인(전월 실적 40만원 이상, 월 한도 2,000원). "
+            "전월 실적 구간별 한도 중 첫 구간만 반영. 신규 발급 중단 카드. "
+            f"{_SHINHAN}/credit/1220057_2207.html"
+        ),
+    },
+    "RULE-CARD-C-DELIVERY": {
+        "document_id": "DOC-PRD-CARD-C-2026",
+        "title": "신한카드 Deep On Platinum+ 카드 안내 (신한카드 공식)",
+        "page": 1,
+        "evidence": (
+            "간편결제 10% + 요기요 추가 10%, 최대 20% 할인(결제 2만원 이상, 건당 인정 5만원이라 "
+            "배달 할인 최대 1만원, 월 6회, 전월 실적 30만원 이상). "
+            "월 한도 10,000원은 시연용 가정이며 상품설명서 확인이 필요함. "
+            "간편결제로 결제해야 한다는 조건과 월 횟수는 규칙 모델에 없어 "
+            f"반영하지 않음. {_SHINHAN}/credit/1188280_2207.html"
+        ),
+    },
 }
 
 # 규칙 버전별 규칙 목록. 이전 버전도 남겨 진행 중인 추천·D 검증이 같은 버전으로 계산되게 한다.
 RULE_VERSIONS: dict[str, list[BenefitRule]] = {
     "BEN-V1": [
-        BenefitRule("RULE-CARD-A-DELIVERY", "PRD-CARD-A", discount_krw=2000, min_order_krw=15000,
-                    min_performance_krw=300000, monthly_cap_krw=10000),
-        BenefitRule("RULE-CARD-B-RATE", "PRD-CARD-B", discount_percent=3, max_discount_krw=3000,
-                    min_performance_krw=500000, monthly_cap_krw=10000),
-        # 가상카드 C: 배달 주문 10% 할인(최대 2천원), 최소 주문 1만2천원, 실적 조건 없음, 월 6천원 한도
-        BenefitRule("RULE-CARD-C-DELIVERY", "PRD-CARD-C", discount_percent=10, max_discount_krw=2000,
-                    min_order_krw=12000, monthly_cap_krw=6000),
+        # 요기요 신한카드 체크: 15%(건당 최대 2천원), 최소 주문 없음, 전월 20만원, 월 6천원
+        BenefitRule("RULE-CARD-A-DELIVERY", "PRD-CARD-A", discount_percent=15,
+                    max_discount_krw=2000, min_performance_krw=200000, monthly_cap_krw=6000),
+        # 신한카드 구독 좋아요: 10%(건당 상한 없음), 최소 주문 없음, 전월 40만원, 월 2천원
+        BenefitRule("RULE-CARD-B-RATE", "PRD-CARD-B", discount_percent=10,
+                    min_performance_krw=400000, monthly_cap_krw=2000),
+        # 신한카드 Deep On Platinum+: 20%(건당 최대 1만원), 최소 주문 2만원,
+        # 전월 30만원, 월 1만원(가정)
+        BenefitRule("RULE-CARD-C-DELIVERY", "PRD-CARD-C", discount_percent=20,
+                    max_discount_krw=10000, min_order_krw=20000, min_performance_krw=300000,
+                    monthly_cap_krw=10000),
         BenefitRule("RULE-LOCAL-A-DISCOUNT", "PRD-LOCAL-A", discount_percent=5, monthly_cap_krw=15000),
     ],
 }

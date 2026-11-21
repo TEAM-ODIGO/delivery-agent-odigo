@@ -7,12 +7,12 @@ from e_payment.db import now
 from e_payment.models import PaymentMethod
 
 SEED = [
-    ("CARD001", "U001", "PRD-CARD-A", "CARD", "가상카드 A", None, 350000),
-    # 가상카드 B: 혜택 조건(당월 실적 50만원 이상)을 채우도록 실적을 올려 결제수단으로 고를 수 있게 함
-    ("CARD002", "U001", "PRD-CARD-B", "CARD", "가상카드 B", None, 550000),
-    ("CARD003", "U001", "PRD-CARD-C", "CARD", "가상카드 C", None, 200000),
+    # 카드 이름은 신한카드 실제 상품명. 혜택 규칙(C)의 전월 실적 조건을 채우도록 시연용 실적을 넣었다.
+    ("CARD001", "U001", "PRD-CARD-A", "CARD", "요기요 신한카드 체크", None, 350000),   # 조건 전월 20만원
+    ("CARD002", "U001", "PRD-CARD-B", "CARD", "신한카드 구독 좋아요", None, 550000),   # 조건 전월 40만원
+    ("CARD003", "U001", "PRD-CARD-C", "CARD", "신한카드 Deep On Platinum+", None, 350000),  # 조건 전월 30만원
     ("LOCAL001", "U001", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", 120000, None),
-    ("CARD101", "U002", "PRD-CARD-A", "CARD", "가상카드 A", None, 100000),
+    ("CARD101", "U002", "PRD-CARD-A", "CARD", "요기요 신한카드 체크", None, 100000),
     ("LOCAL101", "U002", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", 1000, None),
 ]
 
