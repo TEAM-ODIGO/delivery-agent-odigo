@@ -8,6 +8,10 @@
 import os
 from datetime import datetime, timedelta
 
+# 영업시간으로 후보를 거르는 기능은 테스트에서 끈다 (지금 시각에 따라 결과가 바뀌지 않게).
+# 영업시간 테스트는 시각을 직접 넘긴다 (tests/discovery/test_opening_hours.py).
+os.environ.setdefault("DISCOVERY_OPENING_HOURS_FILTER", "0")
+
 import pytest
 from sqlalchemy.orm import sessionmaker
 

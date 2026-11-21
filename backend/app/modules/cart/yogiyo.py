@@ -450,6 +450,18 @@ class BrowserKeeper:
 
         return self._run(go())
 
+    def with_browser(self, fn, *, headless: bool = False, browser_channel: str | None = None):
+        """같은 브라우저로 다른 작업을 한다 (요기요 실시간 확인). fn(browser)는 코루틴을 돌려준다.
+
+        브라우저를 하나만 띄워 요기요 창이 겹쳐 뜨지 않게 한다. 열어 둔 장바구니 창은 그대로 둔다.
+        """
+
+        async def go():
+            browser = await self._browser(headless, browser_channel)
+            return await fn(browser)
+
+        return self._run(go())
+
     def close(self) -> None:
         """열어 둔 요기요 창을 닫는다 (브라우저는 다음 작업을 위해 남겨 둔다)."""
         if self.loop is not None and not self.loop.is_closed():

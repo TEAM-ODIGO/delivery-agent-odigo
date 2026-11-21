@@ -23,6 +23,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from app.modules.cart.yogiyo import BASE, DEMO_LOCATION, _init_script, _launch, _won
 
@@ -47,6 +48,21 @@ _READ_MENUS = """() => [...document.querySelectorAll('[ng-click^="select_menuite
   })
   .filter(m => m.id && !m.text.includes('요기서결제시'))"""
 _PAGE_TEXT = """() => document.body ? document.body.innerText : ''"""
+# 페이지 데이터(angular scope)의 식당 영업 상태: 임시 휴무·휴무일·영업시간 밖·일시 정지 등
+_OPEN_STATUS = """() => {
+  for (const e of [...document.querySelectorAll('.ng-scope')].slice(0, 400)) {
+    let s = null;
+    try { s = angular.element(e).scope(); } catch (err) {}
+    const r = s && s.restaurant;
+    if (r && r.open_status) {
+      const o = r.open_status;
+      return {current: o.current_open_status || null,
+              next_opening_at: o.next_opening_start_at || null,
+              open_time: r.open_time_description || null};
+    }
+  }
+  return null;
+}"""
 _CART_TEXT = """() => (document.querySelector('.cart') || {innerText: ''}).innerText"""
 
 
@@ -74,6 +90,7 @@ class Observed:
     not_serving: bool = False
     denied: bool = False
     redirected: bool = False  # 식당 페이지 대신 첫 화면으로 돌아감 (배달 지역 밖·영업 종료 등)
+    open_status: dict | None = None  # 요기요 영업 상태 {current, next_opening_at, open_time}
     menus_total: int = 0
     items: dict[str, dict] = field(
         default_factory=dict
@@ -145,6 +162,46 @@ def delivery_fee(cart_text: str, page_text: str) -> int | None:
     return None
 
 
+# 요기요 영업 상태(open_status.current_open_status) → 주문 불가 사유. OPENING_TIME이 영업 중
+CLOSED_STATUS = {
+    "TEMP_HOLIDAY": "오늘 임시 휴무예요",
+    "HOLIDAY": "오늘은 정기 휴무일이에요",
+    "CLOSED": "지금은 영업시간이 아니에요",
+    "PAUSE": "가게가 잠시 주문을 받지 않아요",
+    "BREAK_TIME": "지금은 브레이크타임이에요",
+    "PREPARING": "영업 준비 중이에요",
+}
+KST = timezone(timedelta(hours=9))
+
+
+def _opening_at(value: str | None, now: datetime) -> str | None:
+    """'2026-11-21T08:00:00.000Z' → '17:00' (오늘) / '내일 11:00' / '11/23 11:00'."""
+    if not value:
+        return None
+    try:
+        at = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(KST)
+    except ValueError:
+        return None
+    today = now.astimezone(KST).date()
+    hm = at.strftime("%H:%M")
+    if at.date() == today:
+        return hm
+    if at.date() == today + timedelta(days=1):
+        return f"내일 {hm}"
+    return f"{at.month}/{at.day} {hm}"
+
+
+def closed_reason(open_status: dict | None, now: datetime | None = None) -> str | None:
+    """요기요 영업 상태가 '영업 중'이 아니면 그 사유. 모르는 상태나 영업 중이면 None."""
+    if not open_status:
+        return None
+    reason = CLOSED_STATUS.get(open_status.get("current") or "")
+    if reason is None:
+        return None
+    when = _opening_at(open_status.get("next_opening_at"), now or datetime.now(KST))
+    return f"{reason} ({when}에 영업 시작)" if when else reason
+
+
 def _krw(n: int | None) -> str:
     return f"{n:,}원" if n is not None else "?"
 
@@ -153,8 +210,9 @@ def judge(target: CheckTarget, obs: Observed) -> tuple[str, list[str], str | Non
     """요기요에서 읽은 값 → (판정, 바뀐 점, 불가 사유)."""
     if obs.denied:
         return "BLOCKED", [], "요기요가 접속을 막았어요 (Access Denied)"
-    if obs.not_serving:
-        return "UNAVAILABLE", [], "지금 요기요 주문을 받지 않아요 (서비스 미제공)"
+    closed = closed_reason(obs.open_status)
+    if obs.not_serving or closed:
+        return "UNAVAILABLE", [], closed or "지금 요기요 주문을 받지 않아요 (서비스 미제공)"
     if obs.redirected:
         return (
             "UNAVAILABLE",
@@ -219,7 +277,13 @@ async def observe_page(
         "menus": [],
         "delivery_fee_krw": None,
         "min_order_krw": None,
+        "open_status": None,
     }
+    if not obs["denied"] and not obs["redirected"]:
+        try:
+            obs["open_status"] = await page.evaluate(_OPEN_STATUS)
+        except Exception:  # noqa: BLE001 — 못 읽어도 화면 글자로 판정한다
+            obs["open_status"] = None
     if state["menus"] > 0 and not obs["not_serving"] and not obs["redirected"]:
         obs["menus"] = await page.evaluate(_READ_MENUS)
         page_text = await page.evaluate(_PAGE_TEXT)
@@ -236,6 +300,7 @@ def observed_for(page_obs: dict, target: CheckTarget) -> Observed:
         not_serving=bool(page_obs.get("not_serving")),
         denied=bool(page_obs.get("denied")),
         redirected=bool(page_obs.get("redirected")),
+        open_status=page_obs.get("open_status"),
         menus_total=len(menus),
         items=read_items(menus, target.items) if menus else {},
         delivery_fee_krw=page_obs.get("delivery_fee_krw"),

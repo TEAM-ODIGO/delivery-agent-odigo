@@ -26,6 +26,7 @@ from app.modules.discovery.constants import (
     SOURCE_RULE,
     SOURCE_USER,
 )
+from app.modules.discovery.hours import filter_now
 from app.modules.discovery.extractor import (
     extract_by_rules,
     grounded_cuisine,
@@ -360,7 +361,7 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
             "status": request.status,
         })
 
-    bodies, suggestions = search(db, request.constraints, top_n)
+    bodies, suggestions = search(db, request.constraints, top_n, now=filter_now())
 
     # 선택 사항: LLM으로 첫 문장을 다듬는다. 실패하면 기본 문장 그대로
     facts = [" ".join(body["reasons"]) for body in bodies]
