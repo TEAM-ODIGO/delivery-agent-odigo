@@ -237,6 +237,8 @@ function CandidateCard({
         )}
         {local && <Tag tone="pri">{local}</Tag>}
         <LiveBadge r={live} />
+        {/* 태그 줄 기준으로 위치를 잡아서, 사진 아래쪽이 태그 줄과 같은 선에 온다 */}
+        <img className="card-deco" src={cuisineImage(r.cuisine)} alt="" aria-hidden="true" loading="lazy" />
       </div>
       {liveBlocked && <span className="small bad-text">{live?.reason ?? "지금 요기요에서 주문할 수 없어요"}</span>}
       {live?.status === "CHANGED" && live.changes.length > 0 && (
@@ -259,7 +261,6 @@ function CandidateCard({
       ) : (
         c.reasons[0] && <span className="muted small">{c.reasons[0]}</span>
       )}
-      <img className="card-deco" src={cuisineImage(r.cuisine)} alt="" aria-hidden="true" loading="lazy" />
     </button>
   );
 }
