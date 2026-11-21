@@ -65,6 +65,13 @@ button:disabled { cursor: not-allowed; }
 button.card:hover { border-color: #c9cdd3; }
 .card.selected { border: 2px solid var(--pri); padding: 13px 15px; }
 .card.soft { background: #f7f8fa; border-color: transparent; }
+/* 후보 카드 오른쪽 음식 사진: 평점·메뉴·태그 줄만 오른쪽을 비우고, 사진은 태그 줄(.tags) 기준으로 놓는다. 맨 아래 추천 이유 줄은 끝까지 쓴다 */
+.card.has-deco { min-height: 132px; }
+.card.has-deco > :nth-child(-n+4):not(.title-row) { margin-right: 76px; }
+.card.has-deco .tags { position: relative; }
+/* 위치 조정: bottom = 태그 줄 아래선에서 위로 얼마나 띄울지 (음수면 아래로), right = 태그 줄 오른쪽 끝에서 얼마나 바깥으로 뺄지 */
+.card-deco { position: absolute; right: -76px; bottom: 0; width: 64px; height: 64px; object-fit: cover; border-radius: 14px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12); pointer-events: none; }
+button.card:disabled .card-deco { filter: grayscale(1); opacity: 0.5; }
 /* 주문할 수 없는 후보(최소주문금액 미달): 눌러도 선택되지 않는다 */
 button.card:disabled { background: #f3f4f6; border-color: var(--line); }
 button.card:disabled:hover { border-color: var(--line); }

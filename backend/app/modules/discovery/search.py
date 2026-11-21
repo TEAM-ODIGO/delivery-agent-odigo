@@ -145,6 +145,19 @@ def is_primary_cuisine(restaurant: Restaurant, cuisine: str | None) -> bool:
     return False
 
 
+def cuisine_of(restaurant: Restaurant, requested: str | None) -> str | None:
+    """화면 카드 이미지용 음식 종류. 사용자가 고른 종류가 맞으면 그걸 쓰고, 아니면 첫 번째 음식 카테고리로 정한다."""
+    if requested in CUISINES and matches_cuisine(restaurant, requested):
+        return requested
+    for category in restaurant.yogiyo_categories:
+        if category in GENERIC_CATEGORIES:
+            continue
+        for name, info in CUISINES.items():
+            if category in info["categories"]:
+                return name
+    return None
+
+
 def delivery_minutes_of(restaurant: Restaurant) -> int | None:
     """요기요 '23~38분' 중 늦은 쪽(38분)을 예상 시간으로 쓴다. 조건 판정을 보수적으로 하려고."""
     return restaurant.delivery_minutes_max
@@ -675,6 +688,7 @@ def candidate_body(evaluation: Evaluation, constraints: dict) -> dict:
             "accepts_livelihood_voucher": restaurant.accepts_livelihood_voucher,
             "local_currency_merchant": restaurant.local_currency_merchant,
             "local_currency_basis": restaurant.local_currency_basis,
+            "cuisine": cuisine_of(restaurant, constraints.get("cuisine")),
         },
         "items": items,
         "estimated_total_krw": basket.total_krw,

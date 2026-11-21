@@ -57,6 +57,8 @@ export interface Candidate {
     delivery_fee_krw: number | null;
     local_currency_merchant: boolean | null;
     local_currency_basis: "ASSUMED_FROM_VOUCHER" | "KOMSCO_MATCHED" | null;
+    // 음식 종류 (A의 CUISINES 키: 치킨, 피자, 한식 ...). 카드 오른쪽 이미지에 쓴다
+    cuisine?: string | null;
   };
   items: Item[];
   violations: { code: string; message: string | null }[];

@@ -12,6 +12,7 @@ def test_candidate_prompt_carries_restaurant_items_violations(env):
         "delivery_fee_krw",
         "local_currency_merchant",
         "local_currency_basis",
+        "cuisine",  # 카드 우측 음식 이미지용 (A 후보에서 그대로 전달)
     }
     assert c["items"] and set(c["items"][0]) == {"name", "quantity", "unit_price_krw"}
     assert all(set(x) == {"code", "message"} for x in c["violations"])

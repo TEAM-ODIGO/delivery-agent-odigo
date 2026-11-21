@@ -1628,6 +1628,7 @@ class OrchestratorService:
                             "delivery_fee_krw",
                             "local_currency_merchant",
                             "local_currency_basis",
+                            "cuisine",
                         )
                     },
                     "items": [
