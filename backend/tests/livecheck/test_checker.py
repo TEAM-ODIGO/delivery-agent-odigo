@@ -10,6 +10,7 @@ from app.modules.livecheck.checker import (
     CheckResult,
     CheckTarget,
     Observed,
+    closed_reason,
     delivery_fee,
     judge,
     parse_menu_card,
@@ -202,3 +203,27 @@ def test_error_is_retried_once():
     results, checker, _ = _run(plan, concurrency=1, want=3)
     assert [(r.status, r.attempts) for r in results] == [("OK", 2), ("ERROR", 2)]
     assert checker.calls == ["r0", "r0", "r1", "r1"]
+
+
+# ---------------------------------------------------------------- 요기요 영업 상태로 사유 보여 주기
+def test_closed_reason_from_yogiyo_open_status():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 11, 21, 11, 17, tzinfo=timezone(timedelta(hours=9)))
+    assert closed_reason({"current": "TEMP_HOLIDAY"}, now) == "오늘 임시 휴무예요"
+    assert closed_reason({"current": "HOLIDAY"}, now) == "오늘은 정기 휴무일이에요"
+    later = {"current": "CLOSED", "next_opening_at": "2026-11-21T08:00:00.000Z"}  # 17:00 KST
+    assert closed_reason(later, now) == "지금은 영업시간이 아니에요 (17:00에 영업 시작)"
+    tomorrow = {"current": "PAUSE", "next_opening_at": "2026-11-22T02:00:00.000Z"}
+    assert closed_reason(tomorrow, now) == "가게가 잠시 주문을 받지 않아요 (내일 11:00에 영업 시작)"
+    assert closed_reason({"current": "OPENING_TIME"}, now) is None
+    assert closed_reason({"current": "SOMETHING_NEW"}, now) is None
+    assert closed_reason(None, now) is None
+
+
+def test_judge_uses_open_status_even_without_not_serving_text():
+    status, _, reason = judge(_target(), _obs(open_status={"current": "TEMP_HOLIDAY"}))
+    assert (status, reason) == ("UNAVAILABLE", "오늘 임시 휴무예요")
+    status, _, reason = judge(_target(), _obs(not_serving=True))
+    assert reason == "지금 요기요 주문을 받지 않아요 (서비스 미제공)"  # 상태를 못 읽으면 예전 문구
+    assert judge(_target(), _obs(open_status={"current": "OPENING_TIME"}))[0] == "OK"

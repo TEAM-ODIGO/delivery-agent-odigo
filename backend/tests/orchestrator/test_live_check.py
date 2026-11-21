@@ -94,7 +94,7 @@ def test_closed_candidate_is_hidden_and_cannot_be_selected(env, live):
     v = env.flow("CANDIDATES_READY", message=OK_MESSAGE + " #요기요닫힘")
     lc = _view(env, v)
     first = lc["results"][0]
-    assert first["status"] == "UNAVAILABLE" and "서비스 미제공" in first["reason"]
+    assert first["status"] == "UNAVAILABLE" and first["reason"] == "오늘 임시 휴무예요"
     # 주문 불가 후보는 사유와 함께 제자리에 보이되 못 고르고, 다음 순번이 빈자리를 채운다
     assert [r["visible"] for r in lc["results"]] == [True, True, True]
     assert [r["selectable"] for r in lc["results"]] == [False, True, True]

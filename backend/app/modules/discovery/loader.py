@@ -91,6 +91,7 @@ def read_restaurants(path: Path) -> list[dict]:
                     "address": r["주소"],
                     "yogiyo_url": r["요기요링크"],
                     "collected_at": _collected_at(r["수집시각"]),
+                    "opening_hours": (r.get("영업시간") or "").strip() or None,
                 }
             )
     return rows
@@ -152,6 +153,10 @@ def load_if_empty(session: Session) -> tuple[int, int] | None:
         log.warning("식당·메뉴 CSV를 찾지 못해 적재하지 않았습니다: %s (%s, %s 필요)", DATA_DIR, RESTAURANT_CSV, MENU_CSV)
         return None
     return load_csv(session, r, m)
+
+
+def find_restaurant_csv() -> Path | None:
+    return _find_csv(RESTAURANT_CSV)
 
 
 def _find_csv(name: str) -> Path | None:

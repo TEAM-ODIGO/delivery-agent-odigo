@@ -103,6 +103,21 @@ YOGIYO_CART_MODE=real
 - O-15 응답의 `seconds`(전체 확인 시간), 후보별 `seconds`·`cached`로 걸린 시간과 캐시 사용 여부를 볼 수 있다.
 - 창 없는(headless) 브라우저는 요기요가 막는다. `YOGIYO_CART_HEADLESS=0`(기본)을 바꾸지 않는다.
 
+## 영업시간으로 닫힌 식당 미리 빼기 (A-05)
+
+A-05는 `data/1_식당.csv`의 `영업시간` 열(예: `17:00 ~ 03:00`)을 보고, 주문 시각에 영업하지 않는 식당을 후보에서 뺀다.
+요기요를 열기 전에 거르므로 실시간 확인 대상과 시간이 줄어든다.
+
+- `00:00 ~ 00:00`은 24시간 영업, 닫는 시각이 여는 시각보다 이르면 자정을 넘겨 영업한다.
+- 영업시간을 모르는 식당은 지금처럼 후보에 넣고 실시간 확인에 맡긴다. 브레이크타임·휴무일은 요기요 데이터에 없어 실시간 확인이 거른다.
+- 영업시간 모으기 (요기요 식당 페이지의 영업시간, 158곳에 1~2분):
+  ```bash
+  uv run python scripts/collect_opening_hours.py --collect          # 미리 보기 (CSV 안 바꿈)
+  uv run python scripts/collect_opening_hours.py --collect --write  # data/1_식당.csv에 씀
+  ```
+  서버를 다시 켜면 CSV의 영업시간이 DB(`restaurant.opening_hours`)에 반영된다. 예전 DB에는 열이 자동으로 추가된다.
+- 시간과 상관없이 시연하려면 `.env`에 `DISCOVERY_OPENING_HOURS_FILTER=0` (테스트는 기본으로 끔).
+
 ## C(혜택)와 함께 확인
 
 ```bash

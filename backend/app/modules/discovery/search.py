@@ -16,12 +16,14 @@ A는 다른 모듈을 부르지 않는다. 지역화폐 여부도 restaurant 테
 import math
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.discovery.catalog_models import Menu, Restaurant
 from app.modules.discovery.constants import CUISINES, SPICY_NAME_WORDS, TASTES
+from app.modules.discovery.hours import is_open
 
 ORDERABLE_TYPES = ("main", "set")
 MIN_ITEM_PRICE_KRW = 1000  # 이보다 싼 메인은 옵션성 항목으로 보고 담지 않음
@@ -690,8 +692,13 @@ def relaxation_suggestions(evaluations: list[Evaluation], constraints: dict, nee
     return suggestions
 
 
-def search(db: Session, constraints: dict, top_n: int) -> tuple[list[dict], list[dict]]:
-    """후보 JSON 목록과 완화 제안 목록을 돌려준다."""
+def search(
+    db: Session, constraints: dict, top_n: int, now: datetime | None = None
+) -> tuple[list[dict], list[dict]]:
+    """후보 JSON 목록과 완화 제안 목록을 돌려준다.
+
+    now가 있으면 그 시각에 영업하지 않는 식당(영업시간을 아는 식당만)을 후보에서 뺀다.
+    """
     restaurants = list(db.scalars(select(Restaurant)))
     menus_by_restaurant: dict[str, list[Menu]] = {}
     for menu in db.scalars(select(Menu).where(Menu.menu_type.in_(ORDERABLE_TYPES))):
@@ -700,7 +707,10 @@ def search(db: Session, constraints: dict, top_n: int) -> tuple[list[dict], list
     evaluations = []
     for restaurant in restaurants:
         menus = menus_by_restaurant.get(restaurant.restaurant_id, [])
-        evaluations.append(evaluate(restaurant, menus, constraints))
+        evaluation = evaluate(restaurant, menus, constraints)
+        if now is not None and is_open(restaurant.opening_hours, now) is False:
+            evaluation.hard_exclusion = "CLOSED_NOW"
+        evaluations.append(evaluation)
 
     showable = [e for e in evaluations if e.hard_exclusion is None and e.basket is not None]
 

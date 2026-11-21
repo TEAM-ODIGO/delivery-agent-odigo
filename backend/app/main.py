@@ -14,12 +14,14 @@ from fastapi.responses import RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
-from app.core.db import SessionLocal, init_db
+from app.core.db import SessionLocal, engine, init_db
 from app.core.errors import install_error_handlers
 from app.modules.benefit.catalog_source import use_db_restaurants, use_shared_restaurants
 from app.modules.benefit.router import router as benefit_router
 from app.modules.delegation.router import router as delegation_router
-from app.modules.discovery.loader import load_if_empty
+from app.modules.discovery.hours import ensure_column as ensure_hours_column
+from app.modules.discovery.hours import sync_from_csv as sync_hours
+from app.modules.discovery.loader import find_restaurant_csv, load_if_empty
 from app.modules.discovery.router import router as discovery_router
 from app.modules.orchestrator.router import router as orchestrator_router
 from app.modules.ordering.router import router as ordering_router
@@ -48,8 +50,10 @@ def prepare_catalog() -> None:
     """식당·메뉴 데이터(요기요 수집본)를 비어 있으면 적재하고, C가 같은 데이터를 읽게 연결한다."""
     if settings.use_fake_a and settings.use_fake_b:
         return  # 가짜 식당(app/fakes/catalog.py)을 쓰는 구성
+    ensure_hours_column(engine)  # 예전 DB에 영업시간 열 추가
     with SessionLocal() as s:
         load_if_empty(s)
+        sync_hours(s, find_restaurant_csv())  # CSV의 영업시간을 DB에 맞춤
     use_db_restaurants(SessionLocal)
 
 

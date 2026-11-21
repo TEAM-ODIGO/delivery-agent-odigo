@@ -40,6 +40,8 @@ class Restaurant(Base):
     address: Mapped[str | None] = mapped_column(Text)
     yogiyo_url: Mapped[str | None] = mapped_column(Text)
     collected_at: Mapped[datetime | None] = mapped_column(KstDateTime())
+    # 영업시간 "17:00 ~ 03:00" (요기요 open_time_description). 모르면 NULL → 열린 것으로 본다
+    opening_hours: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
 class Menu(Base):
