@@ -16,6 +16,29 @@ import { krw } from "../lib/format";
 
 const isOver = (c: Candidate) => c.violations.some((v) => v.code === "BUDGET_EXCEEDED");
 const MIN_ORDER_TEXT = "최소주문금액이 맞지 않아서 주문이 불가합니다";
+
+// 음식 종류(A의 CUISINES 키) → 카드 오른쪽 이미지 (public/images/cuisine)
+const CUISINE_IMAGES: Record<string, string> = {
+  치킨: "chicken",
+  피자: "pizza",
+  양식: "western",
+  버거: "burger",
+  중식: "chinese",
+  일식: "japanese",
+  "회/초밥": "sushi",
+  한식: "korean",
+  분식: "snack",
+  "찜/탕": "stew",
+  "족발/보쌈": "jokbal",
+  "고기/구이": "meat",
+  "도시락/죽": "lunchbox",
+  샐러드: "salad",
+  샌드위치: "sandwich",
+  아시안: "asian",
+  "카페/디저트": "cafe",
+};
+const cuisineImage = (cuisine?: string | null) =>
+  `/images/cuisine/${(cuisine && CUISINE_IMAGES[cuisine]) || "default"}.png`;
 const DEFAULT_SHOWN = 3; // 확인 결과가 오기 전에 보여 줄 후보 수 (예비 후보는 숨김)
 
 export default function Candidates({ view, busy, send, cancel, decline }: StepProps) {
@@ -191,7 +214,7 @@ function CandidateCard({
 
   return (
     <button
-      className={`card${selected && !blocked ? " selected" : ""}`}
+      className={`card has-deco${selected && !blocked ? " selected" : ""}`}
       onClick={onClick}
       aria-pressed={blocked ? undefined : selected}
       disabled={blocked}
@@ -236,6 +259,7 @@ function CandidateCard({
       ) : (
         c.reasons[0] && <span className="muted small">{c.reasons[0]}</span>
       )}
+      <img className="card-deco" src={cuisineImage(r.cuisine)} alt="" aria-hidden="true" loading="lazy" />
     </button>
   );
 }
