@@ -19,7 +19,13 @@ from app.core.config import settings
 from app.core.db import SessionLocal, get_session
 from app.core.errors import AppError
 from app.modules.cart.service import CartService, release_browser
-from app.modules.orchestrator.schemas import CardDashboardRequest, RefundCreate, Reply, RunCreate
+from app.modules.orchestrator.schemas import (
+    CandidateViews,
+    CardDashboardRequest,
+    RefundCreate,
+    Reply,
+    RunCreate,
+)
 from app.modules.orchestrator.service import OrchestratorService
 from app.modules.orchestrator.wiring import cart_service, demo_tags_available, orchestrator_service
 
@@ -192,6 +198,13 @@ def start_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart
 def get_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
     svc.check_owner(user_id, request_id)
     return cart.latest(request_id) or {"status": "NONE"}
+
+
+@router.post("/runs/{request_id}/candidate-views", summary="(로컬 확장) 후보 화면에 실제로 보인 후보 기록")
+def record_candidate_views(request_id: str, body: CandidateViews, svc: Service, user_id: UserId):
+    return svc.record_candidate_views(
+        user_id, request_id, [s.model_dump() for s in body.shown]
+    )
 
 
 @router.get("/runs/{request_id}/live-check", summary="O-15 후보 요기요 실시간 확인 결과")

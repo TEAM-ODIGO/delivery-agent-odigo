@@ -57,7 +57,7 @@ from app.modules.orchestrator.constants import (
     RunState,
     SyncStatus,
 )
-from app.modules.orchestrator.models import IdempotencyRecord, Run, RunEvent
+from app.modules.orchestrator.models import CandidateView, IdempotencyRecord, Run, RunEvent
 from app.modules.orchestrator.ports import (
     DiscoveryPort,
     OrderingPort,
@@ -1611,6 +1611,45 @@ class OrchestratorService:
                 "방금 확인해 보니 지금 주문할 수 없는 가게예요. 다른 후보를 골라 주세요.",
                 {"candidate_index": cand["index"], "reason": v["reason"]},
             )
+
+    def record_candidate_views(self, user_id: str, request_id: str, shown: list[dict]) -> dict:
+        """(로컬 확장, 이슈 #48) 후보 화면이 실제로 보여 준 후보를 남긴다.
+
+        실시간 확인으로 숨거나 '더 보기'로 접힌 후보가 있어 '후보 포함'과 '화면 표시'가 다르다.
+        후보 선택 단계에서만 남기고, 직전에 남긴 것과 같으면 다시 남기지 않는다 (화면이 여러 번 보내도 한 번).
+        주문 행은 바꾸지 않는다 (같은 순간의 후보 선택과 부딪히지 않게).
+        """
+        run = self._load(request_id, user_id)
+        if run.state != RunState.CANDIDATES_READY:
+            return {"recorded": False, "reason": "NOT_SELECTING"}
+        by_index = {c["index"]: c for c in (run.context or {}).get("candidates", [])}
+        items = []
+        for position, s in enumerate(shown, start=1):
+            cand = by_index.get(s["candidate_index"])
+            if cand is None:
+                continue
+            items.append(
+                {
+                    "candidate_id": cand.get("candidate_id"),
+                    "restaurant_id": cand["restaurant"].get("restaurant_id"),
+                    "position": position,
+                    "collapsed": bool(s.get("collapsed")),
+                    "live_status": s.get("live_status"),
+                }
+            )
+        if not items:
+            return {"recorded": False, "reason": "NO_CANDIDATE"}
+        last = self.session.scalars(
+            select(CandidateView)
+            .where(CandidateView.request_id == request_id)
+            .order_by(CandidateView.id.desc())
+            .limit(1)
+        ).first()
+        if last is not None and last.shown == items:
+            return {"recorded": False, "reason": "SAME_AS_BEFORE"}
+        self.session.add(CandidateView(request_id=request_id, shown=items, created_at=self.now()))
+        self.session.commit()
+        return {"recorded": True, "count": len(items)}
 
     def live_check_view(self, user_id: str, request_id: str) -> dict:
         """O-15. 후보별 요기요 실시간 확인 결과 (화면이 진행 중에 폴링)."""

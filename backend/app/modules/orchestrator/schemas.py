@@ -104,3 +104,15 @@ class RefundCreate(Strict):
 
     payment_method_id: Id  # 지금 보고 있는 카드. 이 카드의 결제가 맞는지 확인한다
     reason: Annotated[str, Field(max_length=300)] | None = None
+
+
+class ShownCandidate(Strict):
+    candidate_index: int = Field(ge=0)
+    collapsed: bool = False  # '조건을 조금 벗어난 가게 더 보기'를 펼쳐서 보인 후보
+    live_status: str | None = Field(default=None, max_length=20)  # 그때 화면의 요기요 실시간 확인 결과
+
+
+class CandidateViews(Strict):
+    """(로컬 확장, 이슈 #48) 후보 화면이 실제로 보여 준 후보. 점주 대시보드의 '화면 표시' 수가 된다."""
+
+    shown: list[ShownCandidate] = Field(max_length=20)

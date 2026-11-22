@@ -86,6 +86,16 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 - 주문 상세(`/admin/runs/:id`): 요약(O-18) + 탭 — 진행 타임라인(O-04, 단계별 머문 시간, 서비스 호출은 접어 둠) · 감사 로그(O-12) · 실시간 확인(O-19) · 요기요 장바구니(O-20)
 - 주문 목록(`/admin/runs`): 시각·가게·상태·금액·사유만, 상태 필터
 
+## 추천 기록: 제외 사유·화면 표시 (이슈 #48, 점주 대시보드용)
+
+- **제외 사유** (`a_exclusion`): A-05 검색마다, 음식 종류는 맞았지만 후보가 되지 못한 가게와 이유를 남긴다.
+  영업시간 외 · 최소주문 미달 · 맞는 메뉴 없음 · 지역화폐 아님 · 예산 초과 · 배달시간 초과 · 말한 메뉴 없음 · 원하는 맛 없음 · 순위 밖.
+  음식 종류가 다른 가게는 남기지 않는다. 조회: `discovery/tracking.py` (`restaurant_summary`: 후보 포함·선택·제외 사유 수)
+- **화면 표시** (`orchestrator_candidate_view`): 후보 화면이 실제로 보여 준 후보를 화면이 보낸다
+  (`POST /orchestrator/runs/{id}/candidate-views`, 로컬 확장). 실시간 확인으로 숨은 후보·접힌 예비 후보는 빠지고,
+  그때의 요기요 실시간 확인 결과도 같이 남는다. 같은 목록은 한 번만 남는다. 조회: `orchestrator/tracking.py`
+  (`shown_summary`: 화면 표시·주문 불가로 보인 수, `completed_count`: 그 가게로 끝난 주문 수 — 모의결제라 매출 아님)
+
 ## 요기요 실시간 식당 확인 (O-15 · O-16)
 
 후보를 보여 줄 때(CANDIDATES_READY) 상위 후보가 지금 요기요에서 주문 가능한지 백그라운드로 확인한다.

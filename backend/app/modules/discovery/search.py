@@ -868,7 +868,12 @@ def evaluate_all(restaurants: list[Restaurant], menus_by_restaurant: dict[str, l
     for restaurant in restaurants:
         menus = menus_by_restaurant.get(restaurant.restaurant_id, [])
         evaluation = evaluate(restaurant, menus, constraints)
-        if now is not None and is_open(restaurant.opening_hours, now) is False:
+        # 음식 종류가 다른 가게는 그 이유를 그대로 둔다 (제외 사유 기록이 '영업시간 외'로 부풀지 않게)
+        if (
+            now is not None
+            and evaluation.hard_exclusion != "CUISINE_MISMATCH"
+            and is_open(restaurant.opening_hours, now) is False
+        ):
             evaluation.hard_exclusion = "CLOSED_NOW"
         evaluations.append(evaluation)
     return evaluations
@@ -938,14 +943,60 @@ def similar_reason(tier: Tier, basket: Basket, keywords: list[str]) -> str | Non
     return f"'{joined}' 대신 비슷한 '{pick}'을(를) 담았어요 ({tier.label})." if pick else None
 
 
+def exclusion_trace(evaluations: list[Evaluation], constraints: dict, chosen_ids: set[str],
+                    require_keyword: bool, require_taste: bool) -> list[dict]:
+    """요청 그대로(EXACT) 평가한 결과에서, 후보가 되지 못한 가게와 그 이유 (이슈 #48, 점주 대시보드용).
+
+    음식 종류가 다른 가게는 남기지 않는다 (요청마다 모든 가게를 쌓지 않게).
+    사유: CLOSED_NOW · BELOW_MIN_ORDER · NO_ORDERABLE_MENU · LOCAL_CURRENCY_NOT_CONFIRMED (평가에서 바로 빠짐)
+          BUDGET_EXCEEDED · DELIVERY_TIME_EXCEEDED (조건을 벗어남)
+          NO_REQUESTED_MENU (말한 메뉴가 없음) · NO_TASTE_MATCH (원하는 맛 메뉴가 없음)
+          OUT_OF_RANK (조건은 맞지만 순위에서 밀림)
+    """
+    keywords = constraints.get("menu_keywords") or []
+    tastes = constraints.get("taste_preferences") or []
+    ranked = sorted(
+        (e for e in evaluations if e.hard_exclusion is None and e.basket is not None and not e.violations),
+        key=lambda e: -e.score,
+    )
+    rank_of = {e.restaurant.restaurant_id: i + 1 for i, e in enumerate(ranked)}
+    out = []
+    for e in evaluations:
+        rid = e.restaurant.restaurant_id
+        if rid in chosen_ids or e.hard_exclusion == "CUISINE_MISMATCH":
+            continue
+        detail: dict = {}
+        if e.hard_exclusion is not None:
+            reason = e.hard_exclusion
+            if reason == "CLOSED_NOW":
+                detail = {"opening_hours": e.restaurant.opening_hours}
+        elif e.basket is None:
+            reason = "NO_ORDERABLE_MENU"
+        elif keywords and require_keyword and not has_keyword(e.basket):
+            reason = "NO_REQUESTED_MENU"
+        elif tastes and require_taste and not has_taste(e.basket):
+            reason = "NO_TASTE_MATCH"
+        elif e.violations:
+            v = e.violations[0]
+            reason = v["code"]
+            detail = {"limit": v.get("limit"), "actual": v.get("actual")}
+        else:
+            reason = "OUT_OF_RANK"
+            detail = {"rank": rank_of.get(rid)}
+        out.append({"restaurant_id": rid, "reason": reason, "detail": detail})
+    return out
+
+
 def search(
-    db: Session, constraints: dict, top_n: int, now: datetime | None = None
+    db: Session, constraints: dict, top_n: int, now: datetime | None = None,
+    trace: list[dict] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """후보 JSON 목록과 완화 제안 목록을 돌려준다.
 
     now가 있으면 그 시각에 영업하지 않는 식당(영업시간을 아는 식당만)을 후보에서 뺀다.
     요청한 메뉴(menu_keywords)를 담을 수 있는 가게가 모자라면 비슷한 메뉴 단계(build_tiers)로 채운다.
     첫 후보에 'search_notice'(왜 비슷한 메뉴인지)가, 비슷한 메뉴 후보에 'match'가 붙는다.
+    trace 목록을 넘기면 후보가 되지 못한 가게와 이유를 채운다 (exclusion_trace).
     """
     restaurants = list(db.scalars(select(Restaurant)))
     menus_by_restaurant: dict[str, list[Menu]] = {}
@@ -1066,6 +1117,9 @@ def search(
         bodies.append(body)
     if bodies and notice:
         bodies[0]["search_notice"] = notice
+    if trace is not None:
+        chosen_ids = {e.restaurant.restaurant_id for _, e in chosen}
+        trace.extend(exclusion_trace(exact_evaluations, constraints, chosen_ids, require_keyword, require_taste))
     return bodies, suggestions
 
 
