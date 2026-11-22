@@ -65,6 +65,10 @@ export interface Candidate {
   // 최소주문금액 미달이면 orderable=false (로컬 확장). min_order에 필요한 금액과 현재 주문 금액이 온다.
   orderable?: boolean;
   min_order?: { required_krw: number; order_krw: number } | null;
+  // 요청한 메뉴가 아니라 비슷한 메뉴로 고른 후보면 있다 (label 예: "비슷한 메뉴", "비슷한 맛(매운·국물)")
+  match?: { level: string; label: string | null } | null;
+  // 조건에 맞는 가게가 모자라 채운 근접 후보 (조건 30% 이내 초과). 화면은 '더 보기'로 접어 둔다
+  near_miss_fill?: boolean;
 }
 
 export interface MethodRef {
@@ -107,7 +111,8 @@ export interface OrderView {
 
 export type Prompt =
   | { type: "CLARIFICATION"; questions: Question[] }
-  | { type: "SELECT_CANDIDATE"; candidates: Candidate[] }
+  // search_notice: 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 그 이유 (예: "'마라탕'을 파는 ○○은 지금 영업시간이 아니에요…")
+  | { type: "SELECT_CANDIDATE"; candidates: Candidate[]; search_notice?: string | null }
   | {
       type: "SELECT_PAYMENT_METHOD";
       options: PaymentOption[];
