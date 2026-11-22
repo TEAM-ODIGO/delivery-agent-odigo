@@ -83,3 +83,22 @@ def check(
         if _same(serial, bound_serial):
             return "NFC_CARD_MISMATCH"
     return "NFC_CARD_NOT_REGISTERED"
+
+
+def identify(nfc_cards: dict[str, str], nfc_tokens: dict[str, str], card_tap: dict) -> tuple[str | None, str | None]:
+    """결제 중이 아닐 때 카드를 대면 '어떤 가상카드인지'만 찾는다 (카드 혜택 화면용, 로컬 확장).
+
+    돌려주는 값: (가상카드 ID, None) 또는 (None, 사유 코드).
+    결제와 달리 고른 카드가 없으므로 등록표 전체에서 토큰 → 일련번호 순으로 찾는다.
+    """
+    serial = normalize_serial(card_tap.get("serial_number") or "")
+    token = (card_tap.get("token") or "").strip()
+    if not serial and not token:
+        return None, "NFC_TAP_EMPTY"
+    for payment_method_id, bound_token in nfc_tokens.items():
+        if _same(token, bound_token):
+            return payment_method_id, None
+    for payment_method_id, bound_serial in nfc_cards.items():
+        if _same(serial, bound_serial):
+            return payment_method_id, None
+    return None, "NFC_CARD_NOT_REGISTERED"

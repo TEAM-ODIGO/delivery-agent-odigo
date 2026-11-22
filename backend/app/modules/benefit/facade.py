@@ -4,6 +4,7 @@ O → C-01 : recommend(body)                (RecommendationPort)
 B·D → C-05 : calculate(body)              (CBenefitPort.calculate)
 D → C-02 : list_payment_methods(user_id)  (CBenefitPort.list_methods)
 O → (로컬 확장) check_min_order(body)     후보 목록에서 최소주문금액 미달을 미리 거른다 (읽기 전용)
+O → (로컬 확장) card_dashboard(user_id, payment_method_id)  NFC 카드를 대면 보여 줄 내 카드 혜택 (읽기 전용)
 
 업무 오류는 AppError(status, code, message, details)로 던진다 (팀 공통 규칙 '모듈 간 오류').
 HTTP 입구(router.py)와 같은 service 함수를 쓰므로 결과가 같다.
@@ -41,3 +42,8 @@ def check_min_order(body: dict[str, Any]) -> dict[str, Any]:
     return service.check_min_order(
         body["user_id"], body.get("request_id"), body["orders"],
         body.get("candidate_payment_method_ids") or None, bool(body.get("local_currency_only")))
+
+
+def card_dashboard(user_id: str, payment_method_id: str) -> dict[str, Any]:
+    """로컬 확장(명세 밖). 카드 혜택 화면: 이번 달 실적·남은 혜택 한도·다음 구간까지 남은 금액·혜택 설명."""
+    return service.card_benefit_summary(user_id, payment_method_id)

@@ -288,3 +288,77 @@ export interface LiveCheckView {
   started_at?: string | null;
   results: LiveResult[];
 }
+
+// ---- 내 카드 혜택 화면 (로컬 확장, 팀 합의 전) ----
+export interface CardTier {
+  min_krw: number; // 전월 이용금액 문턱
+  cap_krw: number; // 그 구간의 배달 할인이 들어가는 월 한도
+}
+
+export interface CardBenefitLine {
+  title: string;
+  rate: string;
+  detail: string;
+  delivery: boolean;
+}
+
+export interface RecentPayment {
+  payment_id: string;
+  request_id: string | null;
+  status: string;
+  charge_krw: number;
+  share_krw: number; // 이 카드가 낸 몫 (분할결제가 아니면 charge_krw와 같다)
+  refunded_krw: number;
+  refundable_krw: number;
+  split: boolean;
+  approved_at: string | null;
+  created_at: string | null;
+  restaurant_name: string | null;
+  message: string | null;
+}
+
+export interface CardDashboard {
+  payment_method_id: string;
+  product_id: string;
+  type: "CARD" | "LOCAL_CURRENCY" | string;
+  name: string;
+  status: string;
+  benefit_rule_version: string;
+  product: {
+    product_name: string | null;
+    card_kind: string | null;
+    annual_fee: string | null;
+    issuance: string | null;
+    headline: string | null;
+    tier_label: string | null;
+    benefits: CardBenefitLine[] | null;
+    notes: string[] | null;
+    source_url: string | null;
+  };
+  checked_at: string | null;
+  monthly_benefit: {
+    cap_krw: number | null;
+    used_krw: number;
+    remaining_krw: number | null;
+    min_performance_krw: number;
+  };
+  performance: {
+    monthly_performance_krw: number;
+    basis: string | null;
+    eligible: boolean;
+    tiers: CardTier[];
+    current: CardTier | null;
+    next: CardTier | null;
+    to_next_krw: number | null;
+    message: string | null;
+  } | null;
+  balance_krw: number | null;
+  recent_payments: RecentPayment[];
+}
+
+export interface RefundResult {
+  payment_id: string;
+  refund_id: string;
+  status: "PENDING" | "REFUNDED" | "FAILED" | "UNKNOWN" | string;
+  amount_krw: number;
+}

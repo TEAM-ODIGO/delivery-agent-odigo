@@ -6,6 +6,7 @@ import RunPage from "./pages/RunPage";
 import MyRuns from "./pages/MyRuns";
 import Admin from "./pages/Admin";
 import Tap from "./pages/Tap";
+import CardDashboardPage from "./pages/CardDashboard";
 
 export default function App() {
   const [toast, setToast] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export default function App() {
                 <Route path="/runs/:requestId" element={<RunPage />} />
                 <Route path="/orders" element={<MyRuns />} />
                 <Route path="/tap" element={<Tap />} />
+                <Route path="/card" element={<CardDashboardPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>

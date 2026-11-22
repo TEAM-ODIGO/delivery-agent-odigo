@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, DEMO_ADDRESS, getUserToken } from "../api/client";
 import type { Action, Delegation, PaymentMethod } from "../api/types";
 import { Button, Screen, Tag } from "../components/ui";
+import CardTapEntry from "../components/CardTapEntry";
 import { ACTION_LABEL, DEMO_TAGS, FAIL_TEXT, krw } from "../lib/format";
 import { useToast } from "../lib/hooks";
 
@@ -120,6 +121,8 @@ export default function NewOrder() {
           {allowedNames ? allowedNames : "결제수단 제한 없음"}
         </span>
       </div>
+
+      <CardTapEntry />
 
       <div className="demo">
         <details>

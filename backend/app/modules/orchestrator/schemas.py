@@ -90,3 +90,17 @@ Reply = Annotated[
     | CancelReply,
     Field(discriminator="type"),
 ]
+
+
+# ---------------- 카드 혜택 화면 (로컬 확장, 팀 합의 전) ----------------
+class CardDashboardRequest(Strict):
+    """결제 중이 아닐 때 NFC 카드를 대면 그 카드의 혜택 화면을 연다."""
+
+    card_tap: CardTap
+
+
+class RefundCreate(Strict):
+    """카드 혜택 화면의 '환불' 버튼. 이 결제의 남은 금액 전부를 환불한다 (금액은 O가 E 기록으로 정한다)."""
+
+    payment_method_id: Id  # 지금 보고 있는 카드. 이 카드의 결제가 맞는지 확인한다
+    reason: Annotated[str, Field(max_length=300)] | None = None

@@ -1,5 +1,5 @@
 // 화면은 O만 부른다 (/orchestrator/...). 개발 서버가 백엔드로 넘겨 준다(vite.config.ts).
-import type { AuditLog, Delegation, PaymentMethod, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView } from "./types";
+import type { AuditLog, CardDashboard, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -130,6 +130,19 @@ export const api = {
   // O-16 후보 요기요 실시간 다시 확인
   recheckLive: (requestId: string) =>
     call<LiveCheckView>(`/orchestrator/runs/${requestId}/live-check`, { method: "POST" }),
+  // (로컬 확장) NFC 카드를 대면 내 카드 혜택 화면
+  cardDashboard: (card_tap: CardTap) =>
+    call<CardDashboard>("/orchestrator/card-taps/dashboard", {
+      method: "POST",
+      body: JSON.stringify({ card_tap }),
+    }),
+  // (로컬 확장) 카드 혜택 화면의 환불 버튼 — 남은 금액 전부 환불
+  refund: (paymentId: string, paymentMethodId: string) =>
+    call<RefundResult>(`/orchestrator/payments/${paymentId}/refunds`, {
+      method: "POST",
+      idempotent: true,
+      body: JSON.stringify({ payment_method_id: paymentMethodId }),
+    }),
   // O-12 (관리자) — D-09 감사 로그
   auditLogs: (token: string, requestId: string) =>
     call<{ count: number; results: AuditLog[] }>(

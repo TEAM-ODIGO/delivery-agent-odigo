@@ -64,7 +64,7 @@ from app.modules.orchestrator.ports import (
     PaymentResponseLost,
     RecommendationPort,
 )
-from app.modules.orchestrator.schemas import RunCreate
+from app.modules.orchestrator.schemas import RefundCreate, RunCreate
 
 CATALOG_VERSION = "CAT-V1"
 TRANSIENT = (TimeoutError, ConnectionError, httpx.TransportError)
@@ -320,6 +320,77 @@ class OrchestratorService:
             for m in res.get("results", [])
         ]
         return {"count": len(results), "results": results}
+
+    # ================================================================ 카드 혜택 화면 (로컬 확장, 팀 합의 전)
+    def card_dashboard(self, user_id: str, card_tap: dict) -> dict:
+        """결제 중이 아닐 때 NFC 카드를 대면: E로 어떤 가상카드인지 찾고 → C의 혜택 요약 + E의 최근 결제 3건.
+        주문(Run)을 만들거나 바꾸지 않는다 (읽기 전용). 카드 토큰은 기록하지 않는다."""
+        found = self._card_port("identify_card_tap")({"card_tap": card_tap})
+        if not found.get("matched"):
+            raise AppError(404, found.get("reason_code") or "NFC_CARD_NOT_REGISTERED",
+                           found.get("message") or "등록되지 않은 NFC 카드예요.")
+        payment_method_id = found["payment_method_id"]
+        summarize = getattr(self.c, "card_dashboard", None)
+        if summarize is None:
+            raise AppError(503, "CARD_DASHBOARD_UNAVAILABLE", "지금은 카드 혜택을 불러올 수 없어요.")
+        try:
+            summary = summarize(user_id, payment_method_id)
+        except AppError as exc:
+            if exc.code == "PAYMENT_METHOD_NOT_FOUND":  # 다른 사람 카드: 존재 여부를 알려 주지 않는다
+                raise AppError(403, "NFC_CARD_NOT_MINE", "내 결제수단에 등록된 카드가 아니에요.") from exc
+            raise
+        payments = self._card_port("list_card_payments")(user_id, payment_method_id, 3)
+        recent = [self._recent_payment(user_id, p) for p in payments.get("items", [])]
+        return {**summary, "recent_payments": recent}
+
+    def refund_payment(self, user_id: str, payment_id: str, body: RefundCreate,
+                       idempotency_key: str | None) -> dict:
+        """카드 혜택 화면의 환불 버튼 → E-05 (남은 금액 전부). 분할결제면 지역화폐 몫도 함께 돌려준다."""
+        payments = self._card_port("list_card_payments")(user_id, body.payment_method_id, 20)
+        target = next((p for p in payments.get("items", []) if p["payment_id"] == payment_id), None)
+        if target is None:
+            raise AppError(404, "PAYMENT_NOT_FOUND", "이 카드의 결제 내역을 찾을 수 없어요.")
+        amount = target.get("refundable_krw") or 0
+        if target.get("status") != "APPROVED" or amount <= 0:
+            raise AppError(409, "NOT_REFUNDABLE", "환불할 수 있는 금액이 없어요.",
+                           {"status": target.get("status")})
+        key = idempotency_key or f"O-REFUND-{uuid.uuid4().hex}"
+        refund = self._card_port("request_refund")(
+            payment_id,
+            {"user_id": user_id, "amount_krw": amount, "reason": body.reason or "카드 혜택 화면에서 환불"},
+            idempotency_key=key,
+        )
+        if refund.get("status") == "PENDING":  # E-05는 접수 응답 → E-06으로 처리 결과를 한 번 확인한다
+            try:
+                refund = self._card_port("get_refund")(payment_id, refund["refund_id"])
+            except AppError:
+                pass  # 결과 확인만 실패: 접수된 상태(PENDING)로 돌려준다
+        return {"payment_id": payment_id, **refund}
+
+    def _card_port(self, name: str) -> Callable[..., dict]:
+        fn = getattr(self.e, name, None)
+        if fn is None:
+            raise AppError(503, "PAYMENT_UNAVAILABLE", "결제 서버가 카드 혜택 화면을 지원하지 않아요.")
+        return fn
+
+    def _recent_payment(self, user_id: str, p: dict) -> dict:
+        run = self.session.get(Run, p.get("request_id")) if p.get("request_id") else None
+        ctx = (run.context or {}) if run is not None and run.user_id == user_id else {}
+        restaurant = (ctx.get("selected_candidate") or {}).get("restaurant") or {}
+        return {
+            "payment_id": p["payment_id"],
+            "request_id": p.get("request_id"),
+            "status": p.get("status"),
+            "charge_krw": p.get("charge_krw"),
+            "share_krw": p.get("share_krw", p.get("charge_krw")),
+            "refunded_krw": p.get("refunded_krw", 0),
+            "refundable_krw": p.get("refundable_krw", 0),
+            "split": bool(p.get("payments")),
+            "approved_at": p.get("approved_at"),
+            "created_at": p.get("created_at"),
+            "restaurant_name": restaurant.get("name"),
+            "message": run.message if ctx else None,
+        }
 
     def list_audit_logs(self, request_id: str) -> dict:
         """O-12: 이 주문에 대해 D가 남긴 감사 로그 (D-09)."""
