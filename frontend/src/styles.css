@@ -251,3 +251,17 @@ table.data tr.row-bad td { background: var(--bad-soft); }
 .more-toggle:hover {
   background: var(--soft);
 }
+
+/* 점주 대시보드 (이슈 #50) */
+.owner-select { width: 260px; padding: 9px 12px; font-size: 14px; }
+.owner-hero { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+.owner-hero .title-row { display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
+.owner-sentence { margin: 2px 0; font-size: 15px; line-height: 1.55; }
+.owner-funnel { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.owner-funnel .up { color: var(--ok); }
+.owner-funnel .down { color: var(--bad); }
+.owner-actions { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.owner-actions li { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.owner-actions li span { color: var(--sub); font-size: 13.5px; }
+.owner-quality li i { background: var(--ok); }
+@media (max-width: 960px) { .owner-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

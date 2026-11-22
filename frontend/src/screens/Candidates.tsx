@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import type { StepProps } from "../pages/RunPage";
 import type { Candidate, LiveResult } from "../api/types";
+import { api } from "../api/client";
 import { LiveBadge, LiveCheckBar, useLiveCheck, useRecheckLive } from "../components/LiveCheck";
 import { Banner, Button, Modal, Screen, Tag } from "../components/ui";
 import { krw } from "../lib/format";
@@ -71,6 +72,25 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
       ? `조건에 딱 맞는 가게는 ${mainList.length}곳이에요. 조건을 조금 벗어난 가게 ${extraList.length}곳도 찾아 뒀어요.`
       : null;
   const [picked, setPicked] = useState<number | null>(orderable[0]?.index ?? null);
+
+  // 화면에 실제로 보인 후보를 기록한다 (이슈 #48, 점주 대시보드의 '화면 표시' 수).
+  // 실시간 확인 결과가 오는 동안 목록이 바뀌므로 1.5초 그대로일 때만 보내고, 실패해도 화면에는 알리지 않는다.
+  const rendered = [
+    ...(mainOrderable ? mainList : list).map((c) => ({ c, collapsed: false })),
+    ...(mainOrderable && showMore ? extraList.map((c) => ({ c, collapsed: true })) : []),
+  ];
+  const viewKey = JSON.stringify(rendered.map(({ c, collapsed }) => [c.index, collapsed, liveOf(c)?.status ?? null]));
+  useEffect(() => {
+    if (rendered.length === 0) return;
+    const shown = rendered.map(({ c, collapsed }) => ({
+      candidate_index: c.index,
+      collapsed,
+      live_status: liveOf(c)?.status ?? null,
+    }));
+    const timer = setTimeout(() => api.recordCandidateViews(view.request_id, shown).catch(() => undefined), 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.request_id, viewKey]);
   const chosen = orderable.find((c) => c.index === picked) ?? orderable[0];
   const nothingOrderable = list.length > 0 && orderable.length === 0;
   const allClosedOnYogiyo = !!lc?.all_unavailable;

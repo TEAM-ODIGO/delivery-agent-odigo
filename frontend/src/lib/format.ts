@@ -188,3 +188,16 @@ export const PAYMENT_STATUS: Record<string, string> = {
   UNKNOWN: "결과 확인 중",
   PENDING: "처리 중",
 };
+
+// 추천에서 빠진 이유 (A 제외 기록, 이슈 #48·#50) → 점주에게 보여 줄 문구
+export const OWNER_EXCLUSION: Record<string, string> = {
+  CLOSED_NOW: "영업시간 아님",
+  BELOW_MIN_ORDER: "최소주문금액 미달",
+  NO_ORDERABLE_MENU: "주문 가능한 메뉴 없음",
+  LOCAL_CURRENCY_NOT_CONFIRMED: "지역화폐 가맹 확인 안 됨",
+  BUDGET_EXCEEDED: "예산 초과",
+  DELIVERY_TIME_EXCEEDED: "배달 시간 초과",
+  NO_REQUESTED_MENU: "찾는 메뉴 없음",
+  NO_TASTE_MATCH: "원하는 맛과 안 맞음",
+  OUT_OF_RANK: "조건은 맞지만 순위 밖",
+};

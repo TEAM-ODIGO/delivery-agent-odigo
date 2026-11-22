@@ -5,6 +5,7 @@ import NewOrder from "./pages/NewOrder";
 import RunPage from "./pages/RunPage";
 import MyRuns from "./pages/MyRuns";
 import Admin from "./pages/Admin";
+import Owner from "./pages/Owner";
 import Tap from "./pages/Tap";
 import CardDashboardPage from "./pages/CardDashboard";
 
@@ -22,6 +23,7 @@ export default function App() {
     <ToastContext.Provider value={show}>
       <Routes>
         <Route path="/admin/*" element={<Admin />} />
+        <Route path="/owner/*" element={<Owner />} />
         <Route
           path="*"
           element={

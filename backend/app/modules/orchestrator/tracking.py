@@ -11,16 +11,26 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import KST
 from app.modules.orchestrator.constants import RunState
 from app.modules.orchestrator.models import CandidateView, Run
 
 UNAVAILABLE = {"UNAVAILABLE", "BLOCKED"}
 
 
-def shown_summary(session: Session, restaurant_id: str, since: datetime) -> dict:
+def _until(until: datetime | None) -> datetime:
+    return until or datetime.max.replace(tzinfo=KST)
+
+
+def shown_summary(
+    session: Session, restaurant_id: str, since: datetime, until: datetime | None = None
+) -> dict:
     shown: set[str] = set()
     unavailable: set[str] = set()
-    for view in session.scalars(select(CandidateView).where(CandidateView.created_at >= since)):
+    views = select(CandidateView).where(
+        CandidateView.created_at >= since, CandidateView.created_at < _until(until)
+    )
+    for view in session.scalars(views):
         for item in view.shown or []:
             if item.get("restaurant_id") != restaurant_id:
                 continue
@@ -30,9 +40,15 @@ def shown_summary(session: Session, restaurant_id: str, since: datetime) -> dict
     return {"shown": len(shown), "shown_unavailable": len(unavailable)}
 
 
-def completed_count(session: Session, restaurant_id: str, since: datetime) -> int:
+def completed_count(
+    session: Session, restaurant_id: str, since: datetime, until: datetime | None = None
+) -> int:
     runs = session.scalars(
-        select(Run).where(Run.state == RunState.COMPLETED, Run.updated_at >= since)
+        select(Run).where(
+            Run.state == RunState.COMPLETED,
+            Run.updated_at >= since,
+            Run.updated_at < _until(until),
+        )
     ).all()
     return sum(
         1

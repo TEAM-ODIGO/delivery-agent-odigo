@@ -418,3 +418,50 @@ export interface AdminRunDetail extends AdminRow {
   error: { code?: string; message?: string } | null;
   notice: { message?: string } | null;
 }
+
+// 점주 대시보드 (이슈 #50)
+export interface OwnerRestaurantRow {
+  restaurant_id: string;
+  name: string;
+  category: string | null;
+  candidates_7d: number;
+}
+export interface OwnerFunnel {
+  candidates: number;
+  shown: number;
+  selected: number;
+  completed: number;
+}
+export interface OwnerNamedCount {
+  name: string;
+  count: number;
+}
+export interface OwnerAction {
+  code: string;
+  title: string;
+  detail: string;
+  count: number;
+}
+export interface OwnerDashboard {
+  restaurant: {
+    restaurant_id: string;
+    name: string;
+    category: string | null;
+    rating: number;
+    review_count: number;
+    min_order_krw: number;
+    base_delivery_fee_krw: number;
+    opening_hours: string | null;
+  };
+  period: { since: string; until: string; days: number };
+  funnel: OwnerFunnel;
+  previous: OwnerFunnel;
+  shown_unavailable: number;
+  exclusions: { reason: string; count: number }[];
+  closed_hours: number[];
+  requested: { foods: OwnerNamedCount[]; tastes: OwnerNamedCount[]; budget_per_person_median: number | null };
+  menus: { name: string; recommended: number; selected: number }[];
+  menu_quality: { mains: number; no_description: number; no_servings: number; no_spice: number };
+  actions: OwnerAction[];
+  demo_data: boolean;
+}
