@@ -10,7 +10,26 @@ import "./CardFlipModal.css";
 
 const FLIP_DELAY_MS = 450; // 앞면을 잠깐 보여 준 뒤 뒤집는다 (같은 카드라 바로 불러와도 뒤집히는 모습이 보이게)
 
-// 상품마다 카드 앞면 색 (시연용 디자인, 실물 카드 디자인이 아님)
+// 카드 앞면 이미지. 순서대로 찾고, 다 못 읽으면 아래 색 카드로 그린다.
+//  1) public/images/cards/{이름}.png·jpg·webp  (직접 넣은 파일이 있으면 그것을 쓴다)
+//  2) 신한카드 공식 카드 플레이트 이미지 (각 카드 안내 페이지의 og:image, 2026-11-22 확인)
+// 가로 이미지는 90도 돌려 세로 카드 틀에 맞춘다.
+const PLATE = "https://www.shinhancard.com/static/images/card/plate";
+const FACE_IMAGE: Record<string, { local: string; official?: string }> = {
+  "PRD-CARD-A": { local: "/images/cards/card-a", official: `${PLATE}/BAAB70_00_h_f_s.png` }, // 요기요 신한카드 체크
+  "PRD-CARD-B": { local: "/images/cards/card-b", official: `${PLATE}/BNCD4E_E5_v_f_s.png` }, // 신한카드 구독 좋아요
+  "PRD-CARD-C": { local: "/images/cards/card-c", official: `${PLATE}/AXDBMR_00_h_f_s.png` }, // 신한카드 Deep On Platinum+
+  "PRD-LOCAL-A": { local: "/images/cards/local-a" }, // 가상 지역화폐 (공식 이미지 없음)
+};
+const IMAGE_EXTS = ["png", "jpg", "webp"];
+
+function imageCandidates(productId: string): string[] {
+  const face = FACE_IMAGE[productId];
+  if (!face) return [];
+  return [...IMAGE_EXTS.map((ext) => `${face.local}.${ext}`), ...(face.official ? [face.official] : [])];
+}
+
+// 이미지가 없을 때 쓰는 카드 앞면 색 (시연용, 실물 카드 디자인이 아님)
 const FACE_TONE: Record<string, string> = {
   "PRD-CARD-A": "tone-a",
   "PRD-CARD-B": "tone-b",
@@ -102,6 +121,34 @@ function CardFront({
   onFlip?: () => void;
 }) {
   const tone = d ? FACE_TONE[d.product_id] ?? "tone-a" : "tone-wait";
+  const candidates = d ? imageCandidates(d.product_id) : [];
+  const [extIndex, setExtIndex] = useState(0);
+  const [landscape, setLandscape] = useState(false);
+  const [imageReady, setImageReady] = useState(false);
+  const imageSrc = extIndex < candidates.length ? candidates[extIndex] : null;
+
+  if (imageSrc && !error) {
+    return (
+      <div className={`flip-face flip-front plate-photo ${tone}${onFlip ? " clickable" : ""}`} onClick={onFlip}>
+        <img
+          className={`plate-img${landscape ? " landscape" : ""}${imageReady ? " ready" : ""}`}
+          src={imageSrc}
+          referrerPolicy="no-referrer"
+          alt={`${d!.name} 카드`}
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            setLandscape(img.naturalWidth > img.naturalHeight);
+            setImageReady(true);
+          }}
+          onError={() => {
+            setImageReady(false);
+            setExtIndex((i) => i + 1); // 다음 후보, 다 없으면 색 카드
+          }}
+        />
+        <span className="plate-hint">카드를 누르면 혜택이 보여요</span>
+      </div>
+    );
+  }
   return (
     <div className={`flip-face flip-front ${tone}${onFlip ? " clickable" : ""}`} onClick={onFlip}>
       <div className="plate-top">
