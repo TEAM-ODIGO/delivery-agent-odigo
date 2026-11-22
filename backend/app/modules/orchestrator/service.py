@@ -44,6 +44,7 @@ from app.modules.delegation.schemas import (
     PolicyCreate,
     RevokeRequest,
 )
+from app.modules.orchestrator import admin
 from app.modules.orchestrator.constants import (
     FINAL,
     PAYMENT_STARTED,
@@ -391,6 +392,26 @@ class OrchestratorService:
             "restaurant_name": restaurant.get("name"),
             "message": run.message if ctx else None,
         }
+
+    # ---- 관리자 대시보드 (이슈 #46, 읽기 전용) ----
+    def admin_summary(self) -> dict:
+        """O-17 오늘 운영 개요 + 조치할 주문."""
+        return admin.summary(self.session, self.now())
+
+    def _admin_load(self, request_id: str) -> Run:
+        run = self.session.scalars(select(Run).where(Run.request_id == request_id)).first()
+        if run is None:
+            raise AppError(404, "RUN_NOT_FOUND", "요청을 찾을 수 없습니다.")
+        return run
+
+    def admin_run_detail(self, request_id: str) -> dict:
+        """O-18 주문 상세 요약 (관리자)."""
+        return admin.detail(self._admin_load(request_id))
+
+    def admin_live_check(self, request_id: str) -> dict:
+        """O-19 후보 요기요 실시간 확인 결과 (관리자). O-15와 같은 내용, 주인 확인만 없음."""
+        run = self._admin_load(request_id)
+        return self.live_check_view(run.user_id, request_id)
 
     def list_audit_logs(self, request_id: str) -> dict:
         """O-12: 이 주문에 대해 D가 남긴 감사 로그 (D-09)."""
