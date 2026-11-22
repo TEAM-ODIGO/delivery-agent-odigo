@@ -36,7 +36,7 @@ from app.modules.discovery.extractor import (
     has_hint,
     normalize_cuisine,
 )
-from app.modules.discovery.models import Candidate, ConstraintsHistory, DiscoveryRequest
+from app.modules.discovery.models import Candidate, ConstraintsHistory, DiscoveryRequest, Exclusion
 from app.modules.discovery.schemas import Constraints, ConstraintsPatch, CreateRequestBody, LlmExtraction, ordered_tastes
 from app.modules.discovery.search import search
 
@@ -361,7 +361,8 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
             "status": request.status,
         })
 
-    bodies, suggestions = search(db, request.constraints, top_n, now=filter_now())
+    trace: list[dict] = []
+    bodies, suggestions = search(db, request.constraints, top_n, now=filter_now(), trace=trace)
     # 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 그 이유 (이슈 #37, 화면 위 안내)
     notice = bodies[0].pop("search_notice", None) if bodies else None
 
@@ -394,6 +395,10 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
         )
         db.add(candidate)
         candidates.append(candidate)
+
+    # 후보가 되지 못한 가게와 이유 (이슈 #48, 점주 대시보드용)
+    for row in trace:
+        db.add(Exclusion(request_id=request_id, search_round=request.search_count, created_at=now, **row))
 
     request.status = RECOMMENDED if candidates else CONFIRMED
     request.updated_at = now
