@@ -1,7 +1,8 @@
-// 내 카드 혜택 화면 (로컬 확장, 팀 합의 전): 결제 중이 아닐 때 NFC 카드를 대면 그 카드의 대시보드를 보여 준다.
-//  - 안드로이드 크롬: 첫 화면에서 카드를 읽고 state.cardTap으로 넘어온다
-//  - 아이폰(및 스캔 중이 아닌 안드로이드): 카드의 URL(/tap?t=토큰)이 열리고, 기다리는 주문이 없으면 /card?t=토큰으로 온다
+// 내 카드 혜택 (로컬 확장, 팀 합의 전): 결제 중이 아닐 때 NFC 카드를 대면 그 카드의 대시보드를 보여 준다.
+//  - 첫 화면에서는 CardFlipModal(카드가 뒤집히는 모달)이 아래 CardDashboardSections를 뒷면에 그린다
+//  - /card?t=토큰 으로 직접 열면 이 파일의 페이지가 같은 내용을 보여 준다 (링크로 공유할 때 등)
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
@@ -9,6 +10,30 @@ import type { CardDashboard, CardTap, RecentPayment } from "../api/types";
 import { Banner, Button, Modal, Row, Screen, Spinner, Tag } from "../components/ui";
 import { krw, when } from "../lib/format";
 import { useToast } from "../lib/hooks";
+
+// 카드 정보로 혜택을 불러온다 (모달·페이지 공용). 같은 카드를 다시 대면 저장된 값을 먼저 보여 주고 새로 불러온다
+export function useCardDashboard(cardTap: CardTap | null) {
+  return useQuery({
+    queryKey: ["card-dashboard", cardTap?.token ?? cardTap?.serial_number ?? ""],
+    queryFn: () => api.cardDashboard(cardTap!),
+    enabled: cardTap !== null,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+// 혜택 화면 본문 (카드 앞면 정보 아래 부분). 모달 뒷면과 /card 페이지가 같이 쓴다
+export function CardDashboardSections({ d, onRefunded }: { d: CardDashboard; onRefunded: () => void }) {
+  return (
+    <>
+      {d.type === "CARD" ? <PerformanceCard d={d} /> : <BalanceCard d={d} />}
+      <BenefitLimitCard d={d} />
+      <RecentPayments d={d} onRefunded={onRefunded} />
+      <BenefitList d={d} />
+      <ProductInfo d={d} />
+    </>
+  );
+}
 
 export default function CardDashboardPage() {
   const nav = useNavigate();
@@ -22,13 +47,7 @@ export default function CardDashboardPage() {
     return t ? { token: t } : null;
   });
 
-  const dashboard = useQuery({
-    queryKey: ["card-dashboard", cardTap?.token ?? cardTap?.serial_number ?? ""],
-    queryFn: () => api.cardDashboard(cardTap!),
-    enabled: cardTap !== null,
-    retry: false,
-    refetchOnWindowFocus: false,
-  });
+  const dashboard = useCardDashboard(cardTap);
 
   const home = <Button onClick={() => nav("/", { replace: true })}>처음으로</Button>;
 
@@ -64,11 +83,7 @@ export default function CardDashboardPage() {
       footer={<Button onClick={() => nav("/")}>이 카드로 주문하러 가기</Button>}
     >
       <CardHero d={d} />
-      {d.type === "CARD" ? <PerformanceCard d={d} /> : <BalanceCard d={d} />}
-      <BenefitLimitCard d={d} />
-      <RecentPayments d={d} onRefunded={() => dashboard.refetch()} />
-      <BenefitList d={d} />
-      <ProductInfo d={d} />
+      <CardDashboardSections d={d} onRefunded={() => dashboard.refetch()} />
     </Screen>
   );
 }
@@ -203,7 +218,8 @@ function RecentPayments({ d, onRefunded }: { d: CardDashboard; onRefunded: () =>
           )}
         </div>
       ))}
-      {confirm && (
+      {confirm &&
+        createPortal(
         <Modal
           label="환불 확인"
           actions={
@@ -222,8 +238,9 @@ function RecentPayments({ d, onRefunded }: { d: CardDashboard; onRefunded: () =>
             {confirm.restaurant_name ?? "이 주문"} 결제를 취소해요.
             {confirm.split && " 지역화폐로 낸 몫도 함께 돌려받아요."}
           </span>
-        </Modal>
-      )}
+        </Modal>,
+          document.body,
+        )}
     </>
   );
 }

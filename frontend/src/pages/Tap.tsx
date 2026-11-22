@@ -1,6 +1,6 @@
 // 아이폰 NFC 결제 (로컬 확장): 카드를 태그하면 iOS가 카드의 URL(/tap?t=토큰)을 Safari로 연다.
 // 이 화면은 승인 화면에서 '카드 태그'를 누른 주문을 찾아, 그 토큰으로 결제(O-02 APPROVE)를 보낸다.
-// 기다리는 주문이 없으면(결제 중이 아니면) 그 카드의 혜택 화면(/card)으로 보낸다.
+// 기다리는 주문이 없으면(결제 중이 아니면) 첫 화면(/?card_t=토큰)으로 보내 카드 모달을 띄운다.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
@@ -33,8 +33,8 @@ export default function Tap() {
     }
     const pending = loadPendingTap();
     if (!pending) {
-      // 결제 중이 아닐 때 카드를 댔다 → 그 카드의 혜택 화면을 연다 (로컬 확장)
-      nav(`/card?t=${encodeURIComponent(token)}`, { replace: true });
+      // 결제 중이 아닐 때 카드를 댔다 → 첫 화면으로 가서 카드 모달을 띄운다 (로컬 확장)
+      nav(`/?card_t=${encodeURIComponent(token)}`, { replace: true });
       return;
     }
     setRequestId(pending);

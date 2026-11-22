@@ -1,0 +1,46 @@
+
+/* 첫 화면 카드 모달: 세로형 카드가 뒤집히며 뒷면에 혜택을 보여 준다 (로컬 확장) */
+.flip-backdrop { position: fixed; inset: 0; z-index: 15; background: rgba(15, 18, 30, .55); display: flex; align-items: center; justify-content: center; padding: 16px; animation: flip-fade .2s ease-out; }
+.flip-scene { perspective: 1400px; width: min(360px, 92vw, calc(88dvh * 0.63)); aspect-ratio: 54 / 85.6; animation: flip-rise .35s cubic-bezier(.2, .8, .2, 1); }
+.flip-card { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .75s cubic-bezier(.3, .7, .2, 1); }
+.flip-card.flipped { transform: rotateY(180deg); }
+.flip-face { position: absolute; inset: 0; border-radius: 20px; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; box-shadow: 0 18px 40px rgba(0, 0, 0, .35); }
+.flip-back { transform: rotateY(180deg) translateZ(1px); background: #fff; display: flex; flex-direction: column; }
+
+/* 앞면 */
+.flip-front { color: #fff; padding: 24px 22px; display: flex; flex-direction: column; justify-content: space-between; }
+.flip-front.clickable { cursor: pointer; }
+.flip-front::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, .18) 45%, transparent 60%); }
+.flip-front.tone-wait { background: linear-gradient(160deg, #3a3f4b, #1f2229); }
+.flip-front.tone-wait::after { animation: flip-shine 1.6s linear infinite; background-size: 250% 100%; }
+.flip-front.tone-a { background: linear-gradient(160deg, #ff5a5f 0%, #e0313c 55%, #a51d2d 100%); }
+.flip-front.tone-b { background: linear-gradient(160deg, #8f7bff 0%, #5b4bdb 55%, #2f2a7a 100%); }
+.flip-front.tone-c { background: linear-gradient(160deg, #4a5568 0%, #1e2533 55%, #0b0e15 100%); }
+.flip-front.tone-local { background: linear-gradient(160deg, #37b26c 0%, #1e8e4e 55%, #11603a 100%); }
+.plate-top { display: flex; justify-content: space-between; align-items: center; }
+.plate-kind { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 6px; background: rgba(255, 255, 255, .2); }
+.plate-wave { font-size: 15px; letter-spacing: -3px; opacity: .85; transform: rotate(90deg) translateX(-2px); }
+.plate-chip { width: 46px; height: 36px; border-radius: 7px; margin-top: -40%; background: linear-gradient(135deg, #f3d98b, #c9a24a); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15); }
+.plate-bottom { display: flex; flex-direction: column; gap: 6px; }
+.plate-name { font-size: 21px; line-height: 1.3; word-break: keep-all; }
+.plate-sub { font-size: 13px; opacity: .85; display: flex; align-items: center; gap: 6px; }
+.plate-spinner { width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%; animation: spin .9s linear infinite; }
+.plate-close { align-self: flex-start; margin-top: 6px; background: rgba(255, 255, 255, .2); color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-weight: 700; }
+
+/* 뒷면 */
+.flip-back-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 16px 16px 12px; border-bottom: 1px solid #eee; }
+.flip-back-head > div { display: flex; flex-direction: column; gap: 2px; }
+.flip-back-head b { font-size: 16px; }
+.flip-close { border: 0; background: var(--soft); width: 30px; height: 30px; border-radius: 15px; font-size: 20px; line-height: 1; flex: none; }
+.flip-back-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.flip-back-body .card { padding: 12px 14px; }
+.flip-back-foot { display: flex; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid #eee; }
+.flip-back-foot .btn { height: 44px; font-size: 14.5px; }
+
+@keyframes flip-fade { from { opacity: 0; } }
+@keyframes flip-rise { from { opacity: 0; transform: translateY(24px) scale(.92); } }
+@keyframes flip-shine { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .flip-card { transition: none; }
+  .flip-backdrop, .flip-scene, .flip-front.tone-wait::after { animation: none; }
+}
