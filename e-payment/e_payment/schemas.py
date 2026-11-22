@@ -60,6 +60,12 @@ class CardTapCheck(_Strict):
     card_tap: CardTap
 
 
+class CardTapIdentify(_Strict):
+    """결제 중이 아닐 때 카드를 대면 어떤 가상카드인지 묻는 요청 (카드 혜택 화면, 로컬 확장)."""
+
+    card_tap: CardTap
+
+
 class RefundRequest(_Strict):
     user_id: Id
     amount_krw: Annotated[int, Field(gt=0, le=100_000_000, strict=True)]

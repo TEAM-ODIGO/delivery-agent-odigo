@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal, get_session
 from app.core.errors import AppError
 from app.modules.cart.service import CartService, release_browser
-from app.modules.orchestrator.schemas import Reply, RunCreate
+from app.modules.orchestrator.schemas import CardDashboardRequest, RefundCreate, Reply, RunCreate
 from app.modules.orchestrator.service import OrchestratorService
 from app.modules.orchestrator.wiring import cart_service, orchestrator_service
 
@@ -112,6 +112,16 @@ def list_my_runs(svc: Service, user_id: UserId, limit: int = 20):
 @router.get("/payment-methods", summary="O-10 맡길 결제수단 목록")
 def list_payment_methods(svc: Service, user_id: UserId):
     return svc.list_payment_methods(user_id)
+
+
+@router.post("/card-taps/dashboard", summary="(로컬 확장) NFC 카드를 대면 내 카드 혜택 화면")
+def card_dashboard(body: CardDashboardRequest, svc: Service, user_id: UserId):
+    return svc.card_dashboard(user_id, body.card_tap.model_dump(exclude_none=True))
+
+
+@router.post("/payments/{payment_id}/refunds", summary="(로컬 확장) 카드 혜택 화면에서 결제 환불")
+def refund_payment(payment_id: str, body: RefundCreate, svc: Service, user_id: UserId, key: IdemKey):
+    return svc.refund_payment(user_id, payment_id, body, key)
 
 
 @router.get(

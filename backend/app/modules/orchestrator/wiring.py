@@ -43,6 +43,7 @@ class _RealBenefit:
     calculate = staticmethod(benefit_facade.calculate)
     list_methods = staticmethod(benefit_facade.list_payment_methods)
     check_min_order = staticmethod(benefit_facade.check_min_order)  # 로컬 확장
+    card_dashboard = staticmethod(benefit_facade.card_dashboard)  # 로컬 확장: 카드 혜택 화면
 
 
 def _d_benefit_port() -> CBenefitPort:
@@ -125,6 +126,9 @@ class _ScenarioHttpPayment:
         self, body: dict
     ) -> dict:  # NFC 실물 카드 태그 확인 (로컬 확장): 그대로 E에 넘긴다
         return self.inner.verify_card_tap(body)
+
+    def __getattr__(self, name):  # 카드 혜택 화면용 호출(로컬 확장)은 시나리오와 무관하니 그대로 넘긴다
+        return getattr(self.inner, name)
 
 
 class _BenefitForB:

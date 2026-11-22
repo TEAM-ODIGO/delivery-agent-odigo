@@ -115,6 +115,21 @@ def create_app(
             "message": nfc.MESSAGES.get(reason) if reason else None,
         }
 
+    @app.post("/internal/card-taps/identify", dependencies=[Auth], summary="NFC 카드로 가상카드 찾기 (O → E, 카드 혜택 화면)")
+    def identify_card_tap(body: schemas.CardTapIdentify):
+        payment_method_id, reason = nfc.identify(cfg.nfc_cards, cfg.nfc_tokens, body.card_tap.model_dump())
+        return {
+            "payment_method_id": payment_method_id,
+            "matched": payment_method_id is not None,
+            "reason_code": reason,
+            "message": nfc.MESSAGES.get(reason) if reason else None,
+        }
+
+    @app.get("/internal/payment-methods/{payment_method_id}/payments", dependencies=[Auth],
+             summary="결제수단별 최근 결제 (O → E, 카드 혜택 화면, 로컬 확장)")
+    def card_payments(payment_method_id: str, db: DB, user_id: Annotated[str, Query(min_length=1)], limit: int = 3):
+        return service.list_card_payments(db, user_id, payment_method_id, limit)
+
     # ---------------- E-03 (E-02보다 먼저 등록: /payments/executions/... 가 {payment_id}로 읽히지 않게) ----------------
     @app.get("/payments/executions/{execution_id}", dependencies=[Auth], summary="E-03 실행 ID로 결제 조회")
     def e03(execution_id: str, db: DB):

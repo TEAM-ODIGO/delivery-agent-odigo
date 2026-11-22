@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from dataclasses import replace
 
-from . import domain, matching, seed, sources
+from . import domain, matching, products, seed, sources
 from .errors import AppError
 from .ledger import get_ledger
 from .schemas import CalculationRequest, ExtractionRequest, RecommendRequest, RuleVersionRequest, SyncRequest
@@ -176,6 +176,57 @@ def list_payment_methods(user_id: str, type: str | None = None, page: int = 1, p
         results.append(item)
     start = (page - 1) * page_size
     return {"count": len(results), "results": results[start:start + page_size]}
+
+
+# ---------- 카드 혜택 화면 (로컬 확장, 명세 밖) ----------
+def card_benefit_summary(user_id: str, payment_method_id: str, request_id: str | None = None) -> dict:
+    """NFC 카드를 결제 중이 아닐 때 대면 보여 줄 '내 카드 혜택' (읽기 전용).
+
+    - 이번 달 실적·잔액: E-11 원장
+    - 남은 혜택 한도: 결제 계산과 같은 규칙(BenefitRule)·사용액으로 계산 → 추천 금액과 어긋나지 않는다
+    - 혜택 설명·실적 구간: products.CARD_PRODUCTS (신한카드 공식 안내 정리본)
+    """
+    methods = get_ledger().get_payment_methods(user_id, request_id)
+    method = next((m for m in methods if m.payment_method_id == payment_method_id), None)
+    if method is None:
+        raise AppError(404, "PAYMENT_METHOD_NOT_FOUND", "결제수단을 찾을 수 없습니다.")
+    version, rules = rules_by_product()
+    rule = rules.get(method.product_id)
+    used = seed.BENEFIT_USED_KRW.get(method.payment_method_id, 0)
+    product = products.CARD_PRODUCTS.get(method.product_id) or {}
+
+    out = {
+        "payment_method_id": method.payment_method_id,
+        "product_id": method.product_id,
+        "type": method.type,
+        "name": method.name,
+        "status": method.status,
+        "benefit_rule_version": version,
+        "product": {k: product.get(k) for k in ("product_name", "card_kind", "annual_fee", "issuance",
+                                                 "headline", "tier_label", "benefits", "notes", "source_url")},
+        "checked_at": products.CHECKED_AT if product else None,
+        "monthly_benefit": {
+            "cap_krw": rule.monthly_cap_krw if rule else None,
+            "used_krw": used,
+            "remaining_krw": domain.remaining_monthly_krw(rule, used),
+            "min_performance_krw": rule.min_performance_krw if rule else 0,
+        },
+    }
+    if method.type == "CARD":
+        perf = method.monthly_performance_krw
+        progress = products.tier_progress(product, perf)
+        out["performance"] = {
+            "monthly_performance_krw": perf,
+            "basis": product.get("performance_basis"),
+            "eligible": rule is not None and perf >= rule.min_performance_krw,
+            "tiers": product.get("tiers") or [],
+            **progress,
+        }
+        out["balance_krw"] = None
+    else:
+        out["performance"] = None
+        out["balance_krw"] = method.balance_krw
+    return out
 
 
 # ---------- C-05 혜택 재계산 ----------
