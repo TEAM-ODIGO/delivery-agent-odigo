@@ -13,20 +13,31 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.modules.discovery.models import Candidate, DiscoveryRequest, Exclusion
+from app.modules.discovery.timeutil import KST
 
 
-def candidate_count(db: Session, restaurant_id: str, since: datetime) -> int:
-    return (
-        db.scalar(
-            select(func.count())
-            .select_from(Candidate)
-            .where(Candidate.restaurant_id == restaurant_id, Candidate.created_at >= since)
+def _until(until: datetime | None) -> datetime:
+    return until or datetime.max.replace(tzinfo=KST)
+
+
+def candidate_count(
+    db: Session, restaurant_id: str, since: datetime, until: datetime | None = None
+) -> int:
+    stmt = (
+        select(func.count())
+        .select_from(Candidate)
+        .where(
+            Candidate.restaurant_id == restaurant_id,
+            Candidate.created_at >= since,
+            Candidate.created_at < _until(until),
         )
-        or 0
     )
+    return db.scalar(stmt) or 0
 
 
-def selected_count(db: Session, restaurant_id: str, since: datetime) -> int:
+def selected_count(
+    db: Session, restaurant_id: str, since: datetime, until: datetime | None = None
+) -> int:
     return (
         db.scalar(
             select(func.count())
@@ -38,25 +49,35 @@ def selected_count(db: Session, restaurant_id: str, since: datetime) -> int:
                     Candidate.candidate_id == DiscoveryRequest.selected_candidate_id,
                 ),
             )
-            .where(Candidate.restaurant_id == restaurant_id, DiscoveryRequest.updated_at >= since)
+            .where(
+            Candidate.restaurant_id == restaurant_id,
+            DiscoveryRequest.updated_at >= since,
+            DiscoveryRequest.updated_at < _until(until),
+        )
         )
         or 0
     )
 
 
-def exclusion_reasons(db: Session, restaurant_id: str, since: datetime) -> dict[str, int]:
+def exclusion_reasons(
+    db: Session, restaurant_id: str, since: datetime, until: datetime | None = None
+) -> dict[str, int]:
     rows = db.scalars(
         select(Exclusion.reason).where(
-            Exclusion.restaurant_id == restaurant_id, Exclusion.created_at >= since
+            Exclusion.restaurant_id == restaurant_id,
+            Exclusion.created_at >= since,
+            Exclusion.created_at < _until(until),
         )
     ).all()
     return dict(Counter(rows).most_common())
 
 
-def restaurant_summary(db: Session, restaurant_id: str, since: datetime) -> dict:
+def restaurant_summary(
+    db: Session, restaurant_id: str, since: datetime, until: datetime | None = None
+) -> dict:
     return {
         "restaurant_id": restaurant_id,
-        "candidates": candidate_count(db, restaurant_id, since),
-        "selected": selected_count(db, restaurant_id, since),
-        "exclusions": exclusion_reasons(db, restaurant_id, since),
+        "candidates": candidate_count(db, restaurant_id, since, until),
+        "selected": selected_count(db, restaurant_id, since, until),
+        "exclusions": exclusion_reasons(db, restaurant_id, since, until),
     }

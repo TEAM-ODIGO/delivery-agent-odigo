@@ -25,6 +25,7 @@ from app.modules.discovery.loader import find_restaurant_csv, load_if_empty, syn
 from app.modules.discovery.router import router as discovery_router
 from app.modules.orchestrator.router import router as orchestrator_router
 from app.modules.ordering.router import router as ordering_router
+from app.modules.owner.router import router as owner_router
 
 log = logging.getLogger("app")
 if not log.handlers:  # 따로 설정이 없으면 "app" 로그(INFO)도 uvicorn 로그처럼 터미널에 보이게
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(delegation_router)
     app.include_router(discovery_router)  # A: /discovery/... (점검용 직접 호출. O는 함수로 호출)
     app.include_router(ordering_router)  # B: /ordering/... (점검용 직접 호출. O는 함수로 호출)
+    app.include_router(owner_router)  # 점주 대시보드 (이슈 #50, 읽기 전용)
     app.include_router(benefit_router)  # C: /benefit/... (관리자·점검용 직접 호출 + 모듈 간 함수 호출)
     use_shared_restaurants()  # C가 팀 공용 식당 데이터를 읽도록 연결
 
