@@ -362,3 +362,54 @@ export interface RefundResult {
   status: "PENDING" | "REFUNDED" | "FAILED" | "UNKNOWN" | string;
   amount_krw: number;
 }
+
+// ---- 관리자 대시보드 (이슈 #46) ----
+export type AdminAction = "PAYMENT_UNKNOWN" | "STUCK" | "REPEATED_FAILURE" | "FAILED" | "BLOCKED";
+
+export interface AdminRow extends RunRow {
+  user_id: string;
+  reason_codes: string[];
+}
+
+export interface AdminActionRow extends AdminRow {
+  action: AdminAction;
+  stuck_minutes?: number;
+}
+
+// O-17 오늘 운영 개요
+export interface AdminSummary {
+  date: string;
+  counts: {
+    started: number;
+    completed: number;
+    payment_unknown: number;
+    blocked: number;
+    failed: number;
+    cancelled: number;
+    in_progress: number;
+  };
+  top_reasons: { code: string; count: number }[];
+  by_step: { state: RunState; label: string; count: number }[];
+  actions: AdminActionRow[];
+  action_count: number;
+  stuck_minutes: number;
+}
+
+// O-18 주문 상세 요약
+export interface AdminRunDetail extends AdminRow {
+  constraints: Record<string, unknown> | null;
+  candidate_count: number;
+  selected: { restaurant_name: string | null; items: Item[]; estimated_total_krw: number | null } | null;
+  payment: {
+    payment_method_id: string | null;
+    menu_subtotal_krw: number | null;
+    delivery_fee_krw: number | null;
+    instant_discount_krw: number | null;
+    charge_krw: number | null;
+    payment_id: string | null;
+    payment_status: string | null;
+  } | null;
+  blocked: { reason_codes?: string[] } | null;
+  error: { code?: string; message?: string } | null;
+  notice: { message?: string } | null;
+}

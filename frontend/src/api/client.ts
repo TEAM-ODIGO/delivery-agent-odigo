@@ -1,5 +1,5 @@
 // 화면은 O만 부른다 (/orchestrator/...). 개발 서버가 백엔드로 넘겨 준다(vite.config.ts).
-import type { AuditLog, CardDashboard, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView } from "./types";
+import type { AdminRunDetail, AdminSummary, AuditLog, CardDashboard, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -143,6 +143,19 @@ export const api = {
       idempotent: true,
       body: JSON.stringify({ payment_method_id: paymentMethodId }),
     }),
+  // (로컬 확장) 시연 태그(#품절·#결제미확정 …)가 이 서버 구성에서 동작하는지
+  demoTags: () => call<{ available: boolean }>("/orchestrator/demo-tags"),
+  // O-17 (관리자) 오늘 운영 개요·조치할 주문
+  adminSummary: (token: string) => call<AdminSummary>("/orchestrator/admin/summary", { token }),
+  // O-18 (관리자) 주문 상세 요약
+  adminRunDetail: (token: string, requestId: string) =>
+    call<AdminRunDetail>(`/orchestrator/admin/runs/${requestId}`, { token }),
+  // O-19 (관리자) 후보 요기요 실시간 확인 결과
+  adminLiveCheck: (token: string, requestId: string) =>
+    call<LiveCheckView>(`/orchestrator/admin/runs/${requestId}/live-check`, { token }),
+  // O-20 (관리자) 요기요 장바구니 담기 결과
+  adminYogiyoCart: (token: string, requestId: string) =>
+    call<YogiyoCartJob>(`/orchestrator/admin/runs/${requestId}/yogiyo-cart`, { token }),
   // O-12 (관리자) — D-09 감사 로그
   auditLogs: (token: string, requestId: string) =>
     call<{ count: number; results: AuditLog[] }>(

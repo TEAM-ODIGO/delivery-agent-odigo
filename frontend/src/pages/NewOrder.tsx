@@ -39,6 +39,8 @@ export default function NewOrder() {
   const [delegation, setDelegation] = useState<Delegation>(loadDelegation);
   const [editing, setEditing] = useState(false);
   const toast = useToast();
+  // 시연 태그가 이 서버 구성에서 동작할 때만 '시연 시나리오 넣기'를 보여 준다 (이슈 #46)
+  const demoTags = useQuery({ queryKey: ["demo-tags"], queryFn: api.demoTags, staleTime: 60_000 });
   const nav = useNavigate();
   const qc = useQueryClient();
   const methods = useQuery({ queryKey: ["payment-methods", getUserToken()], queryFn: api.paymentMethods });
@@ -139,23 +141,25 @@ export default function NewOrder() {
       <CardTapEntry onCard={setTappedCard} />
       {tappedCard && <CardFlipModal cardTap={tappedCard} onClose={closeCard} />}
 
-      <div className="demo">
-        <details>
-          <summary>시연 시나리오 넣기</summary>
-          <div className="chips">
-            {DEMO_TAGS.map((t) => (
-              <button
-                key={t.tag}
-                className="chip"
-                title={t.desc}
-                onClick={() => setMessage((m) => (m.includes(t.tag) ? m : `${m.trim()} ${t.tag}`.trim()))}
-              >
-                {t.tag} <span className="faint">&nbsp;{t.desc}</span>
-              </button>
-            ))}
-          </div>
-        </details>
-      </div>
+      {demoTags.data?.available && (
+        <div className="demo">
+          <details>
+            <summary>시연 시나리오 넣기</summary>
+            <div className="chips">
+              {DEMO_TAGS.map((t) => (
+                <button
+                  key={t.tag}
+                  className="chip"
+                  title={t.desc}
+                  onClick={() => setMessage((m) => (m.includes(t.tag) ? m : `${m.trim()} ${t.tag}`.trim()))}
+                >
+                  {t.tag} <span className="faint">&nbsp;{t.desc}</span>
+                </button>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
       <Link to="/orders" className="nav-link">
         내 주문 보기 ›
       </Link>

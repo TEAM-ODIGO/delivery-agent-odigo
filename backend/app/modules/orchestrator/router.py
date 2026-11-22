@@ -21,7 +21,7 @@ from app.core.errors import AppError
 from app.modules.cart.service import CartService, release_browser
 from app.modules.orchestrator.schemas import CardDashboardRequest, RefundCreate, Reply, RunCreate
 from app.modules.orchestrator.service import OrchestratorService
-from app.modules.orchestrator.wiring import cart_service, orchestrator_service
+from app.modules.orchestrator.wiring import cart_service, demo_tags_available, orchestrator_service
 
 router = APIRouter(prefix="/orchestrator", tags=["O · orchestrator"])
 
@@ -134,6 +134,43 @@ def admin_runs(svc: Service, limit: int = 100, state: str | None = None):
 
 
 @router.get(
+    "/admin/summary",
+    summary="O-17 오늘 운영 개요·조치할 주문 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_summary(svc: Service):
+    return svc.admin_summary()
+
+
+@router.get(
+    "/admin/runs/{request_id}",
+    summary="O-18 주문 상세 요약 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_run_detail(request_id: str, svc: Service):
+    return svc.admin_run_detail(request_id)
+
+
+@router.get(
+    "/admin/runs/{request_id}/live-check",
+    summary="O-19 후보 요기요 실시간 확인 결과 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_live_check(request_id: str, svc: Service):
+    return svc.admin_live_check(request_id)
+
+
+@router.get(
+    "/admin/runs/{request_id}/yogiyo-cart",
+    summary="O-20 요기요 장바구니 담기 결과 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_yogiyo_cart(request_id: str, svc: Service, cart: Cart):
+    svc.admin_run_detail(request_id)  # 없는 주문이면 404
+    return cart.latest(request_id) or {"status": "NONE"}
+
+
+@router.get(
     "/admin/runs/{request_id}/audit-logs",
     summary="O-12 주문별 D 감사 로그 (관리자)",
     dependencies=[Depends(require_admin)],
@@ -179,6 +216,12 @@ def get_run(request_id: str, svc: Service, user_id: UserId):
 )
 def list_events(request_id: str, svc: Service):
     return svc.list_events(request_id)
+
+
+@router.get("/demo-tags", summary="(로컬 확장) 시연 태그가 이 구성에서 동작하는지")
+def demo_tags():
+    """화면이 '시연 시나리오 넣기'(#품절·#결제미확정 …)를 보여 줄지 정한다 (이슈 #46)."""
+    return {"available": demo_tags_available()}
 
 
 @router.get("/health", summary="O-05 상태 확인")

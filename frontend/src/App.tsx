@@ -21,7 +21,7 @@ export default function App() {
   return (
     <ToastContext.Provider value={show}>
       <Routes>
-        <Route path="/admin" element={<Admin />} />
+        <Route path="/admin/*" element={<Admin />} />
         <Route
           path="*"
           element={

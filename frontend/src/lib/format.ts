@@ -116,3 +116,75 @@ export const DEMO_TAGS = [
   { tag: "#응답유실", desc: "결제 응답 유실" },
   { tag: "#A장애", desc: "탐색 서비스 장애" },
 ];
+
+// ---- 관리자 대시보드 (이슈 #46) ----
+// 실패·차단 사유 코드 → 짧은 문구 (표·목록용). 모르는 코드는 코드 그대로
+export const FAIL_SHORT: Record<string, string> = {
+  NO_CANDIDATE: "후보 없음",
+  NO_PAYMENT_METHOD: "쓸 수 있는 결제수단 없음",
+  PAYMENT_FAILED: "결제 거절",
+  PAYMENT_NOT_STARTED: "결제 시작 안 됨",
+  DEPENDENCY_UNAVAILABLE: "서비스 장애",
+  REQUEST_REJECTED: "결제 요청 거절",
+  CANDIDATE_UNAVAILABLE: "요기요 주문 불가",
+  MOCK_DECLINED: "모의 결제 거절",
+};
+export const reasonText = (code: string) => BLOCK_REASON[code] ?? FAIL_SHORT[code] ?? EXCLUDE_REASON[code] ?? code;
+
+// 조치할 주문의 이유
+export function actionText(action: string, stuckMinutes?: number): string {
+  switch (action) {
+    case "PAYMENT_UNKNOWN":
+      return "결제 결과를 확인해야 해요";
+    case "STUCK":
+      return `진행이 ${stuckMinutes ?? ""}분째 멈췄어요`;
+    case "REPEATED_FAILURE":
+      return "같은 사용자가 반복 실패";
+    case "BLOCKED":
+      return "진행 차단";
+    case "FAILED":
+      return "처리 실패";
+    default:
+      return action;
+  }
+}
+
+// 단계 이력(O-04) 종류 → 문구
+export const EVENT_LABEL: Record<string, string> = {
+  STATE_CHANGED: "단계 이동",
+  USER_REPLY: "사용자 응답",
+  SERVICE_CALL: "서비스 호출",
+  SERVICE_ERROR: "서비스 오류",
+  PAYMENT_RESULT: "결제 결과",
+  LIVE_CHECKED: "요기요 실시간 확인",
+};
+
+export function stateText(state: string | null | undefined): string {
+  if (!state) return "";
+  return STATE_BADGE[state as RunState]?.label ?? state;
+}
+
+// 두 시각 사이 (초 단위 → "3초", "2분 5초")
+export function gap(fromIso: string, toIso: string): string {
+  const sec = Math.max(0, Math.round((new Date(toIso).getTime() - new Date(fromIso).getTime()) / 1000));
+  if (sec < 60) return `${sec}초`;
+  const m = Math.floor(sec / 60);
+  return sec % 60 ? `${m}분 ${sec % 60}초` : `${m}분`;
+}
+
+// 사용자 응답(O-02) 종류 → 문구
+export const REPLY_LABEL: Record<string, string> = {
+  CLARIFICATION: "조건 답변",
+  SELECT_CANDIDATE: "후보 선택",
+  SELECT_PAYMENT_METHOD: "결제수단 선택",
+  APPROVE: "승인",
+  CANCEL: "취소",
+};
+
+// 결제 상태(E) → 문구
+export const PAYMENT_STATUS: Record<string, string> = {
+  APPROVED: "승인됨",
+  FAILED: "거절됨",
+  UNKNOWN: "결과 확인 중",
+  PENDING: "처리 중",
+};
