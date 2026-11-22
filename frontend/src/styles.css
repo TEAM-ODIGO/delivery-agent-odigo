@@ -193,3 +193,18 @@ table.data tr.sel td { background: var(--pri-soft); }
 .benefit-row:last-child { border-bottom: 0; }
 .benefit-row b { font-size: 14.5px; }
 .benefit-rate { font-weight: 800; color: var(--pri); white-space: nowrap; }
+
+/* 조건을 조금 벗어난 가게 더 보기 (이슈 #37) */
+.more-toggle {
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--sub);
+  font-size: 14px;
+  cursor: pointer;
+}
+.more-toggle:hover {
+  background: var(--soft);
+}
