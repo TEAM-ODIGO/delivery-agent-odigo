@@ -40,7 +40,7 @@ from app.modules.discovery.timeutil import now_kst  # noqa: E402
 from app.modules.orchestrator.models import CandidateView, Run, RunEvent  # noqa: E402
 from app.modules.owner.service import DEMO_PREFIX  # noqa: E402
 
-ADDRESS = {"region_code": "11140", "lat": 37.5665868, "lng": 126.97819753}
+ADDRESS = {"region_code": "11140", "lat": 37.5660509, "lng": 126.98237295}  # 을지로입구역
 FOODS = ["치킨", "피자", "떡볶이", "마라탕", "짜장면", "짬뽕", "국밥", "김치찌개", "초밥", "돈까스",
          "족발", "햄버거", "한식", "중식", "분식", "탕수육", "부대찌개", "쌀국수"]
 TASTES = ["", "", "", "안 매운 ", "매운 ", "국물 있는 "]

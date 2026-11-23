@@ -1,11 +1,16 @@
-"""Ollama 로컬 LLM 호출 (명세 A-09 'AI 추론 요청'의 MVP 1 버전).
+"""LLM 호출 (명세 A-09 'AI 추론 요청'의 MVP 1 버전).
 
+제공자는 LLM_PROVIDER로 고른다 (이슈 #62): openrouter(기본, OpenRouter API) | ollama(로컬).
 공통 규칙 제안대로 REST가 아닌 A 내부 함수로 둔다.
-LLM이 꺼져 있거나, 시간이 넘거나, JSON이 깨지면 None을 돌려주고 호출한 쪽은 규칙 기반 결과를 쓴다.
-모든 호출은 a_llm_call 테이블에 기록한다.
+LLM이 꺼져 있거나, 키가 없거나, 시간이 넘거나, JSON이 깨지면 None을 돌려주고 호출한 쪽은 규칙 기반 결과를 쓴다.
+모든 호출은 a_llm_call 테이블에 기록한다 (API 키는 남기지 않는다).
+
+외부(OpenRouter)로 보내는 것은 주문 문장(조건 추출)과 후보 사실 문장(추천 이유)뿐이다.
+배달 주소·사용자 ID는 보내지 않는다.
 """
 
 import json
+import threading
 import time
 
 import httpx
@@ -60,13 +65,30 @@ EXPLAIN_SYSTEM_PROMPT = """너는 배달 추천 이유를 쓰는 도우미다. �
 reasons의 개수와 순서는 입력 후보와 같아야 한다."""
 
 
+_last_model = threading.local()  # 마지막 호출에서 실제로 답한 모델 (기록용)
+
+
+class LlmUnavailable(Exception):
+    """다시 해도 소용없는 실패: 서버 연결 안 됨, 키 없음·틀림(401·403), 잔액 부족(402). 바로 규칙으로 넘어간다."""
+
+
+# OpenRouter 앱 표시용 헤더 (선택). 키가 아니라서 기록돼도 괜찮다
+APP_HEADERS = {"HTTP-Referer": "https://github.com/TEAM-ODIGO/delivery-agent-odigo", "X-Title": "ODIGO"}
+
+
 def _record(db: Session, request_id: str, purpose: str, success: bool, attempt: int,
             latency_ms: int, error: str | None) -> None:
+    settings = get_settings()
+    model = settings.model
+    if success and settings.llm_provider == "openrouter":
+        model = getattr(_last_model, "value", None) or model
+    if settings.llm_provider == "openrouter" and model != settings.openrouter_model and success:
+        model = f"{model} (대체)"
     db.add(
         LlmCall(
             request_id=request_id,
             purpose=purpose,
-            model=get_settings().ollama_model,
+            model=f"{settings.llm_provider}:{model}"[:100],
             success=success,
             attempt=attempt,
             latency_ms=latency_ms,
@@ -77,6 +99,79 @@ def _record(db: Session, request_id: str, purpose: str, success: bool, attempt: 
 
 
 def _chat(system_prompt: str, user_content: str, json_format) -> dict:
+    """제공자에 맞게 한 번 부르고 JSON 결과를 돌려준다.
+
+    json_format: dict면 그 JSON 스키마를 강제하고, "json"이면 JSON이기만 하면 된다.
+    """
+    if get_settings().llm_provider == "openrouter":
+        _last_model.value = None
+        return _chat_openrouter(system_prompt, user_content, json_format)
+    return _chat_ollama(system_prompt, user_content, json_format)
+
+
+def _chat_openrouter(system_prompt: str, user_content: str, json_format) -> dict:
+    settings = get_settings()
+    if not settings.openrouter_api_key:
+        raise LlmUnavailable("OPENROUTER_API_KEY가 없어요")
+    if isinstance(json_format, dict):
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": "result", "strict": True, "schema": {**json_format, "additionalProperties": False}},
+        }
+    else:
+        response_format = {"type": "json_object"}
+    payload = {
+        "model": settings.openrouter_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "temperature": 0,
+        "response_format": response_format,
+        # 구조화 출력을 지원하는 곳으로만 보낸다
+        "provider": {"require_parameters": True},
+    }
+    fallbacks = [m for m in settings.openrouter_fallback_models if m != settings.openrouter_model][:3]
+    if fallbacks:
+        # 주 모델이 오류(서비스 중단·요청 제한 등)를 내면 OpenRouter가 이 순서대로 시도한다 (요청은 한 번)
+        payload["models"] = fallbacks
+    url = settings.openrouter_base_url.rstrip("/") + "/chat/completions"
+    headers = {"Authorization": f"Bearer {settings.openrouter_api_key}", **APP_HEADERS}
+    response = httpx.post(url, json=payload, headers=headers, timeout=settings.llm_timeout_seconds)
+    if response.status_code in (400, 404) and "temperature" in payload:
+        # 생각하는(reasoning) 모델은 temperature를 받지 않아 '처리할 곳 없음'으로 거절된다 → 빼고 한 번 더
+        payload.pop("temperature")
+        response = httpx.post(url, json=payload, headers=headers, timeout=settings.llm_timeout_seconds)
+    if response.status_code in (400, 404):
+        raise ValueError(f"OpenRouter {response.status_code}: {_error_message(response)}")
+    if response.status_code in (401, 402, 403):
+        raise LlmUnavailable(f"OpenRouter {response.status_code}: {_error_message(response)}")
+    response.raise_for_status()  # 429·5xx → httpx.HTTPStatusError (한 번 더 시도)
+    body = response.json()
+    if body.get("error"):
+        raise ValueError(f"OpenRouter 오류: {str(body['error'])[:200]}")
+    _last_model.value = body.get("model") or settings.openrouter_model  # 실제로 답한 모델 (대체됐으면 그 모델)
+    content = body["choices"][0]["message"]["content"]
+    return json.loads(_strip_code_fence(content))
+
+
+def _error_message(response: httpx.Response) -> str:
+    try:
+        return str(response.json().get("error", {}).get("message", ""))[:200]
+    except ValueError:
+        return response.text[:200]
+
+
+def _strip_code_fence(text: str) -> str:
+    """```json ... ``` 으로 감싸 오는 모델도 있어서 벗긴다."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        text = text.rsplit("```", 1)[0]
+    return text.strip()
+
+
+def _chat_ollama(system_prompt: str, user_content: str, json_format) -> dict:
     settings = get_settings()
     payload = {
         "model": settings.ollama_model,
@@ -112,7 +207,11 @@ def extract_conditions(db: Session, request_id: str, message: str) -> LlmExtract
             # 서버가 꺼져 있으면 다시 해도 소용없으니 바로 포기
             _record(db, request_id, "EXTRACT", False, attempt, _elapsed_ms(started), f"connect: {error}")
             return None
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValidationError) as error:
+        except LlmUnavailable as error:
+            # 키 없음·틀림·잔액 부족: 다시 해도 같다
+            _record(db, request_id, "EXTRACT", False, attempt, _elapsed_ms(started), str(error)[:500])
+            return None
+        except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError, ValidationError) as error:
             _record(db, request_id, "EXTRACT", False, attempt, _elapsed_ms(started), str(error)[:500])
 
     return None
@@ -138,16 +237,31 @@ def explain_candidates(db: Session, request_id: str, facts: list[str]) -> list[s
             cleaned.append(reason.strip()[:200])
         _record(db, request_id, "EXPLAIN", True, 1, _elapsed_ms(started), None)
         return cleaned
-    except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError, AttributeError) as error:
+    except (httpx.HTTPError, json.JSONDecodeError, KeyError, ValueError, AttributeError, LlmUnavailable) as error:
         _record(db, request_id, "EXPLAIN", False, 1, _elapsed_ms(started), str(error)[:500])
         return None
 
 
 def check_llm() -> str:
-    """health용: Ollama가 켜져 있고 모델이 있으면 UP."""
+    """health용. OpenRouter: 키가 유효하면 UP (GET /key, 모델 호출 비용 없음). Ollama: 켜져 있고 모델이 있으면 UP."""
     settings = get_settings()
     if not settings.llm_enabled:
         return "DISABLED"
+    if settings.llm_provider == "openrouter":
+        if not settings.openrouter_api_key:
+            return "NO_API_KEY"
+        try:
+            response = httpx.get(
+                settings.openrouter_base_url.rstrip("/") + "/key",
+                headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
+                timeout=3.0,
+            )
+            if response.status_code in (401, 403):
+                return "INVALID_KEY"
+            response.raise_for_status()
+            return "UP"
+        except httpx.HTTPError:
+            return "DOWN"
     try:
         response = httpx.get(settings.ollama_base_url.rstrip("/") + "/api/tags", timeout=2.0)
         response.raise_for_status()

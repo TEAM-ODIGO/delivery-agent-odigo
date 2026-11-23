@@ -1,6 +1,6 @@
 """규칙 기반 조건 추출기.
 
-LLM(Ollama)이 꺼져 있거나 실패해도 주문 흐름이 멈추지 않도록 정규식·단어 사전으로 조건을 뽑는다.
+LLM(OpenRouter·Ollama)이 꺼져 있거나 실패해도 주문 흐름이 멈추지 않도록 정규식·단어 사전으로 조건을 뽑는다.
 LLM이 성공했을 때도 LLM이 놓친 항목을 채우는 데 쓴다.
 
 결과는 (조건 dict, 해석 메모 dict) 이다.
@@ -14,6 +14,7 @@ from app.modules.discovery.constants import (
     CUISINES,
     DEFAULT_FAST_DELIVERY_MINUTES,
     DISH_KEYWORDS,
+    MENU_WORD_ALIASES,
     TASTE_ORDER,
     TASTES,
 )
@@ -327,6 +328,7 @@ def normalize_cuisine(value: str | None) -> str | None:
 def find_menu_keywords(text: str) -> list[str]:
     """문장에 나온 메뉴 단어. 더 긴 단어의 일부면 빼고(타코야끼의 '타코'), 같은 뜻 표기는 하나만 둔다."""
     found = [keyword for keyword in DISH_KEYWORDS if keyword in text]
+    found += [dish for alias, dish in MENU_WORD_ALIASES.items() if alias in text and dish not in found]
     result = []
     for keyword in found:
         if any(keyword != other and keyword in other for other in found):

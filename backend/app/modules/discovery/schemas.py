@@ -50,6 +50,8 @@ class Constraints(BaseModel):
     menu_keywords: list[str] = Field(default_factory=list)
     # A 확장: 메뉴 이름 없이 맛만 말했을 때 ("매운 음식" → ["SPICY"])
     taste_preferences: list[str] = Field(default_factory=list)
+    # A 확장 (이슈 #58): 브랜드로 말했을 때 ("맘스터치 시켜줘" → ["맘스터치"]). 그 브랜드 가게에서 먼저 찾는다
+    brands: list[str] = Field(default_factory=list)
 
 
 # ---------- A-01 ----------
@@ -78,6 +80,7 @@ class ConstraintsPatch(BaseModel):
     max_delivery_minutes: int | None = Field(default=None, ge=10, le=180)
     menu_keywords: list[str] | None = None
     taste_preferences: list[Taste] | None = None
+    brands: list[str] | None = None
 
 
 class PatchConstraintsBody(BaseModel):
