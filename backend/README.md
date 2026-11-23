@@ -176,6 +176,35 @@ uv run python scripts/recollect_catalog.py --from latest --write  # 방금 읽�
 - 쓰기 전 원래 CSV는 `cart_runs/catalog-backup-날짜/`에 복사된다. 바뀐 줄만 바뀐다 (`git diff data/`로 확인).
 - 서버를 다시 켜면 CSV의 수집시각이 DB보다 새로우므로 DB가 CSV에 맞춰진다 (C-08이 쓰는 지역화폐 열은 그대로).
 
+## 식당 종류 늘리기 (새 식당 수집, 이슈 #58)
+
+처음 수집은 요기요 카테고리 6개만 돌아 족발/보쌈·버거·중국집·아시안 같은 종류가 적다.
+을지로입구역(시연 주소) 기준으로 요기요 카테고리 목록을 읽어, **적은 종류부터** 새 식당을 골라 줄을 더한다.
+창이 뜨는 브라우저로 페이지만 읽고 장바구니에는 담지 않는다.
+
+```bash
+uv run python scripts/collect_catalog.py --list              # 목록 읽기 + 고를 식당·종류별 수 보기 (2~4분, CSV 안 바꿈)
+uv run python scripts/collect_catalog.py --plan --target 15  # 방금 읽은 목록으로 목표만 바꿔 다시 보기 (브라우저 없음)
+uv run python scripts/collect_catalog.py --collect           # 고른 식당 페이지 읽기 + 메뉴 자동 분류 (CSV 안 바꿈)
+uv run python scripts/collect_catalog.py --collect --add 배스킨라빈스 설빙  # 종류가 차 있어도 이 이름의 가게를 꼭 넣기
+uv run python scripts/collect_catalog.py --plan --target-for 카페/디저트=40  # 종류별 목표를 따로
+uv run python scripts/collect_catalog.py --reclassify        # (분류 규칙을 고친 뒤) 다시 읽지 않고 메뉴 분류만 다시 붙이기
+uv run python scripts/collect_catalog.py --write             # 방금 읽은 결과를 CSV에 더하기
+```
+
+- 음식 종류는 요기요 세부 카테고리 16가지. 종류별 목표(`--target`, 기본 20곳)가 될 때까지 랭킹 순으로 고른다.
+  이미 많은 종류(피자·한식 등)는 고르지 않는다. 리뷰 10개 미만·지금 배달 불가·이미 있는 식당은 뺀다.
+- 새 메뉴의 유형(본메뉴·사이드·세트·음료·주류)·맵기·국물·인분·대표·인기는 `scripts/catalog_classify.py` 규칙으로 붙인다.
+  기존 메뉴로 맞춰 보면 유형이 95% 같다 (`--check-classifier`). 확인은 `cart_runs/catalog-new-날짜-report.md`.
+- 기존 줄은 글자 그대로 두고 새 줄만 더한다. 쓰기 전 원래 CSV는 `cart_runs/catalog-backup-날짜/`에 복사된다.
+- 같은 종류 안에서는 아직 없는 브랜드를 먼저 고른다 (뚜레쥬르·바스버거 지점만 여러 곳 들어오지 않게).
+- 서버를 다시 켜면 새 식당이 DB에 들어간다.
+- 브랜드로 말하면("맘스터치 시켜줘", "베라", "교촌", "엽떡") 그 브랜드 매장들에서 먼저 찾는다. 그 브랜드가 지금 주문할 수 없으면
+  다른 가게를 고르고 첫 카드에 그렇다고 알린다 (`discovery/brands.py`, 조건의 `brands`).
+- 디저트 단어(케이크·마카롱·와플·크로플·도넛·탕후루·요거트·크레페 등)는 카페/디저트 가게에서 찾는다.
+- '베라'·'배스킨'은 아이스크림, '설빙'은 빙수로 알아듣는다. 배스킨라빈스처럼 메뉴 이름에 '아이스크림'이 없어도
+  '레디팩'·'파인트' 같은 이름으로 찾는다 (`constants.MENU_WORD_ALIASES`·`MENU_NAME_ALIASES`).
+
 ## C(혜택)와 함께 확인
 
 ```bash

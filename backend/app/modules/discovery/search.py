@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.discovery.catalog_models import Menu, Restaurant
-from app.modules.discovery.constants import CUISINES, DISH_PROFILES, SPICY_NAME_WORDS, TASTES
+from app.modules.discovery.constants import CUISINES, DISH_PROFILES, MENU_NAME_ALIASES, SPICY_NAME_WORDS, TASTES
 from app.modules.discovery.hours import is_open
 
 ORDERABLE_TYPES = ("main", "set")
@@ -30,7 +30,10 @@ SIDE_TYPES = ("side",)  # 예산이 남으면 곁들임으로 하나 더 담는�
 SIDE_MAX_SHARE = 0.4  # 곁들임 가격이 장바구니 메뉴값의 40%를 넘으면 담지 않는다
 SIDE_MIN_PRICE_KRW = 2500  # 이보다 싸면 공기밥·소스 같은 추가 항목으로 본다
 SIDE_SKIP_WORDS = ["공기밥", "즉석밥", "햇반", "추가", "소스", "후라이", "단무지", "피클", "무말랭이", "국물",
-                   "파우더", "시즈닝", "와사비", "쌈장", "젓가락", "포장", "비조리"]
+                   "파우더", "시즈닝", "와사비", "쌈장", "젓가락", "포장", "비조리",
+                   # 음식이 아닌 물건 (배스킨라빈스 파티용품 등)
+                   "머리띠", "풍선", "숫자초", "물결초", "캔들", "고깔", "가랜드", "폭죽", "보냉백", "드라이아이스"]
+OVER_BUDGET_SLACK_KRW = 3000  # 예산 안 장바구니가 없을 때, 가장 싼 것보다 이만큼 비싸도 구성이 나으면 고른다
 MIN_ITEM_PRICE_KRW = 1000  # 이보다 싼 메인은 옵션성 항목으로 보고 담지 않음
 MIN_PRICE_PER_SERVING_KRW = 5000  # 1인분은 적어도 이 정도 가격이라고 본다 (핫도그 1개를 한 끼로 세지 않게)
 LIGHT_ITEM_PRICE_KRW = 4000  # 이보다 싼 메뉴(김말이·너겟 등)는 단독으로 한 끼를 채우지 않고 곁들이로만 담는다
@@ -89,8 +92,11 @@ class Basket:
 
     @property
     def servings(self) -> float:
+        """끼니 양. 최소주문을 채우려고 담은 사이드는 세지 않는다 (치즈볼을 한 끼로 보지 않게)."""
         total = 0.0
         for item, quantity in self.lines:
+            if item.menu.menu_type in SIDE_TYPES:
+                continue
             total += item.servings * quantity
         return total
 
@@ -190,6 +196,15 @@ def contains_any(text: str, words: list[str]) -> str | None:
     return None
 
 
+def name_has_keyword(name: str, keyword: str) -> bool:
+    """메뉴 이름에 사용자가 말한 메뉴가 있는지. 이름에 음식 이름이 안 나오는 메뉴는 MENU_NAME_ALIASES로 본다."""
+    return any(word in name for word in MENU_NAME_ALIASES.get(keyword, [keyword]) if word)
+
+
+def name_has_any_keyword(name: str, keywords: list[str]) -> bool:
+    return any(name_has_keyword(name, keyword) for keyword in keywords)
+
+
 def matches_taste(menu: Menu, code: str) -> bool:
     """이 메뉴가 그 맛인지. 순서: 이름에 확실한 단어 → 수집 데이터 → 이름의 일반 단어 (constants.TASTES 주석)."""
     info = TASTES[code]
@@ -273,7 +288,7 @@ def build_item(menu: Menu, constraints: dict, side: bool = False) -> Item | None
             return None
 
     keywords = constraints.get("menu_keywords") or []
-    keyword_hit = contains_any(menu.name, keywords) is not None
+    keyword_hit = name_has_any_keyword(menu.name, keywords)
     taste_hit = matches_all_tastes(menu, constraints.get("taste_preferences") or [])
 
     preference = 0.0
@@ -336,8 +351,52 @@ def _lines_basket(restaurant: Restaurant, lines: list[tuple[Item, int]], people:
     return None
 
 
-def candidate_baskets(restaurant: Restaurant, items: list[Item], people: int) -> list[Basket]:
+def fill_with_sides(restaurant: Restaurant, lines: list[tuple[Item, int]], sides: list[Item]) -> Basket | None:
+    """최소주문금액이 모자라면 본메뉴를 더 담는 대신 사이드로 채운다 (이슈 #58: 혼자 버거 3개 → 버거 + 감자튀김).
+
+    모자란 금액 이상인 사이드 중 가장 싼 것, 없으면 가장 비싼 것부터 담는다 (서로 다른 사이드 최대 3개).
+    """
+    subtotal = sum(item.menu.price_with_required_options_krw * quantity for item, quantity in lines)
+    gap = restaurant.min_order_krw - subtotal
+    if gap <= 0:
+        return None  # 이미 채워짐: 기본 장바구니가 같은 것을 만든다
+    usable = [
+        side for side in sides
+        if side.menu.price_with_required_options_krw >= SIDE_MIN_PRICE_KRW
+        and not contains_any(side.menu.name, SIDE_SKIP_WORDS)
+    ]
+    added: list[tuple[Item, int]] = []
+    while gap > 0 and len(added) < 3:
+        left = [side for side in usable if all(side is not chosen for chosen, _ in added)]
+        if not left:
+            return None
+        enough = [side for side in left if side.menu.price_with_required_options_krw >= gap]
+        if enough:
+            pick = min(enough, key=lambda side: (side.menu.price_with_required_options_krw, -side.base_preference))
+        else:
+            pick = max(left, key=lambda side: (side.menu.price_with_required_options_krw, side.base_preference))
+        added.append((pick, 1))
+        gap -= pick.menu.price_with_required_options_krw
+    if gap > 0:
+        return None
+    return make_basket(restaurant, lines + added)
+
+
+def candidate_baskets(
+    restaurant: Restaurant, items: list[Item], people: int, sides: list[Item] | None = None
+) -> list[Basket]:
     baskets = []
+
+    # 인원수만큼 담고 최소주문금액은 사이드로 채운 장바구니
+    for item in items:
+        if item.is_light or not sides:
+            continue
+        quantity = max(1, math.ceil(people / max(item.servings, 0.5)))
+        if quantity > MAX_QUANTITY:
+            continue
+        basket = fill_with_sides(restaurant, [(item, quantity)], sides)
+        if basket is not None:
+            baskets.append(basket)
 
     # 메뉴 1종을 인원수만큼 (최소주문금액이 모자라면 한두 개 더)
     for item in items:
@@ -396,7 +455,7 @@ def basket_quality(basket: Basket, people: int) -> float:
 def keywords_covered(basket: Basket, keywords: list[str]) -> int:
     covered = 0
     for keyword in keywords:
-        if any(keyword in item.menu.name for item, _ in basket.lines):
+        if any(name_has_keyword(item.menu.name, keyword) for item, _ in basket.lines):
             covered += 1
     return covered
 
@@ -405,7 +464,8 @@ def basket_preference(basket: Basket) -> float:
     """수량으로 가중한 선호도 평균 (말한 메뉴를 더 많이 담은 쪽이 높게)."""
     total = 0.0
     count = 0
-    for item, quantity in basket.lines:
+    mains = [(item, quantity) for item, quantity in basket.lines if item.menu.menu_type not in SIDE_TYPES]
+    for item, quantity in mains or basket.lines:  # 최소주문을 채운 사이드는 메뉴 선호에 넣지 않는다
         total += item.preference * quantity
         count += quantity
     return total / count
@@ -460,8 +520,11 @@ def choose_basket(baskets: list[Basket], budget_krw: int | None, people: int = 1
         within.sort(key=lambda basket: (-basket_quality(basket, people), basket.total_krw))
         return within[0]
 
-    baskets.sort(key=lambda basket: basket.total_krw)
-    return baskets[0]
+    # 예산 안이 없으면 거의 가장 싼 것들 중 구성이 나은 것 (혼자인데 버거 3개보다 버거 + 사이드)
+    cheapest = min(basket.total_krw for basket in baskets)
+    close = [basket for basket in baskets if basket.total_krw <= cheapest + OVER_BUDGET_SLACK_KRW]
+    close.sort(key=lambda basket: (-basket_quality(basket, people), basket.total_krw))
+    return close[0]
 
 
 def add_side(restaurant: Restaurant, basket: Basket, sides: list[Item], budget_krw: int | None,
@@ -522,7 +585,7 @@ def evaluate(restaurant: Restaurant, menus: list[Menu], constraints: dict) -> Ev
     people = constraints.get("people") or 1
     budget = constraints.get("budget_krw")
     keywords = constraints.get("menu_keywords") or []
-    basket = choose_basket(candidate_baskets(restaurant, items, people), budget, people, keywords)
+    basket = choose_basket(candidate_baskets(restaurant, items, people, sides), budget, people, keywords)
     if basket is not None:
         basket = add_side(restaurant, basket, sides, budget, people)
     if basket is None:
@@ -665,11 +728,27 @@ def default_reasons(evaluation: Evaluation, constraints: dict) -> list[str]:
     return [first, " · ".join(details)]
 
 
+def main_first(lines: list[tuple[Item, int]]) -> list[tuple[Item, int]]:
+    """후보 카드에 보일 순서: 말한 메뉴 → 본메뉴(비싼 순) → 사이드 (이슈 #58).
+
+    장바구니는 최소주문을 채우려고 싼 메뉴를 먼저 담기도 해서('블록팩 1, 파인트 1') 그대로 보여 주면
+    채우기용 메뉴가 주인공처럼 보인다.
+    """
+    return sorted(
+        lines,
+        key=lambda line: (
+            line[0].menu.menu_type in SIDE_TYPES,
+            not line[0].keyword_hit,
+            -line[0].menu.price_with_required_options_krw * line[1],
+        ),
+    )
+
+
 def candidate_body(evaluation: Evaluation, constraints: dict) -> dict:
     restaurant = evaluation.restaurant
     basket = evaluation.basket
     items = []
-    for item, quantity in basket.lines:
+    for item, quantity in main_first(basket.lines):
         items.append({
             "menu_id": item.menu.menu_id,
             "name": item.menu.name,
@@ -991,6 +1070,25 @@ def search(
     db: Session, constraints: dict, top_n: int, now: datetime | None = None,
     trace: list[dict] | None = None,
 ) -> tuple[list[dict], list[dict]]:
+    """브랜드를 말했으면(constraints.brands) 그 브랜드 가게에서 먼저 찾고, 없으면 전체에서 찾아 그렇다고 알린다."""
+    wanted = constraints.get("brands") or []
+    if wanted:
+        bodies, suggestions = _search(db, constraints, top_n, now, trace=None, only_brands=wanted)
+        if bodies:
+            if trace is not None:  # 제외 기록은 브랜드 가게만이 아니라 전체 기준으로 남긴다
+                _search(db, constraints, top_n, now, trace=trace)
+            return bodies, suggestions
+    bodies, suggestions = _search(db, constraints, top_n, now, trace=trace)
+    if wanted and bodies:
+        names = ", ".join(f"'{b}'" for b in wanted)
+        bodies[0]["search_notice"] = f"{names} 매장은 지금 조건에 맞게 주문할 수 없어 다른 가게를 골랐어요."
+    return bodies, suggestions
+
+
+def _search(
+    db: Session, constraints: dict, top_n: int, now: datetime | None = None,
+    trace: list[dict] | None = None, only_brands: list[str] | None = None,
+) -> tuple[list[dict], list[dict]]:
     """후보 JSON 목록과 완화 제안 목록을 돌려준다.
 
     now가 있으면 그 시각에 영업하지 않는 식당(영업시간을 아는 식당만)을 후보에서 뺀다.
@@ -999,6 +1097,8 @@ def search(
     trace 목록을 넘기면 후보가 되지 못한 가게와 이유를 채운다 (exclusion_trace).
     """
     restaurants = list(db.scalars(select(Restaurant)))
+    if only_brands:
+        restaurants = [r for r in restaurants if brand_of(r.name) in only_brands]
     menus_by_restaurant: dict[str, list[Menu]] = {}
     for menu in db.scalars(select(Menu).where(Menu.menu_type.in_(ORDERABLE_TYPES + SIDE_TYPES))):
         menus_by_restaurant.setdefault(menu.restaurant_id, []).append(menu)
@@ -1042,19 +1142,24 @@ def search(
             other_near += near
         # 요청 메뉴(조건 일부 벗어남 포함)와 비슷한 메뉴로 충분히 찼으면 더 넓히지 않는다
         enough = exact_meet + other_meet if not keywords else exact_meet + exact_near + other_meet
-        if brands(enough) >= top_n:
+        if (len(enough) if only_brands else brands(enough)) >= top_n:
             break
 
     used_brands: set[str] = set()
+    used_stores: set[str] = set()  # 같은 가게가 여러 단계(정확·비슷한 메뉴)에서 나와도 한 번만
 
     def pick(pairs: list[tuple[Tier, Evaluation]]) -> list[tuple[Tier, Evaluation]]:
         picked = []
         for tier, evaluation in pairs:
             brand = brand_of(evaluation.restaurant.name)
-            if brand in used_brands:
+            store = evaluation.restaurant.restaurant_id
+            if store in used_stores:
+                continue
+            if brand in used_brands and not only_brands:  # 브랜드를 말했으면 같은 브랜드 여러 매장을 보여 준다
                 continue
             picked.append((tier, evaluation))
             used_brands.add(brand)
+            used_stores.add(store)
             if len(picked) == top_n:
                 break
         return picked
@@ -1152,7 +1257,7 @@ def keyword_suggestions(restaurants: list[Restaurant], menus_by_restaurant: dict
         if not matches_cuisine(restaurant, constraints.get("cuisine")):
             continue
         for menu in menus_by_restaurant.get(restaurant.restaurant_id, []):
-            if menu.is_sold_out or not contains_any(menu.name, keywords):
+            if menu.is_sold_out or not name_has_any_keyword(menu.name, keywords):
                 continue
             if max_spice is not None and menu.spice_level is not None and menu.spice_level > max_spice:
                 spicy_levels.append(menu.spice_level)

@@ -36,7 +36,7 @@ from pathlib import Path
 log = logging.getLogger("app.cart")
 
 BASE = "https://www.yogiyo.co.kr/mobile/#/"
-DEMO_LOCATION = Path(__file__).with_name("demo_location.json")  # 서울시청 (공공 주소)
+DEMO_LOCATION = Path(__file__).with_name("demo_location.json")  # 을지로입구역 (공공 주소, 이슈 #58)
 
 # 페이지 안에서 실행하는 코드 (내장 브라우저에서 그대로 확인한 것)
 _COUNT_MENUS = """() => document.querySelectorAll('[ng-click^="select_menuitem"]').length"""
@@ -81,7 +81,7 @@ class CartOrder:
     items: list[CartItem]
     expected_menu_subtotal_krw: int | None = None  # B 견적의 메뉴 합계 (대조용)
     expected_delivery_fee_krw: int | None = None
-    location: dict | None = None  # ngStorage-location 값. 없으면 서울시청
+    location: dict | None = None  # ngStorage-location 값. 없으면 을지로입구역
 
 
 @dataclass
