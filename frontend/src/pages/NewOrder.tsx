@@ -11,7 +11,9 @@ import CardFlipModal from "../components/CardFlipModal";
 import { ACTION_LABEL, DEMO_TAGS, FAIL_TEXT, krw } from "../lib/format";
 import { useToast } from "../lib/hooks";
 
-const EXAMPLES = ["둘이서 2만원 이하로 안 매운 치킨 빨리", "혼자 1만5천원 이하 떡볶이", "셋이서 피자 3만원"];
+// 예시 (이슈 #64): 수집 데이터로 점심·저녁·밤 10시 모두 조건에 딱 맞는 가게가 3곳 나오는 문장
+// (scripts/check_queries.py로 확인). 맛·메뉴 조합·브랜드·인원을 한 번씩 보여 준다
+const EXAMPLES = ["둘이서 안 매운 걸로 3만원", "둘이서 짜장면 탕수육 3만원", "혼자 베라 2만원", "넷이서 치킨 6만원"];
 const ALL_ACTIONS: Action[] = ["SEARCH", "BUILD_ORDER", "REQUEST_PAYMENT"];
 const DEFAULT_DELEGATION: Delegation = {
   allowed_actions: ALL_ACTIONS,
@@ -100,7 +102,7 @@ export default function NewOrder() {
     >
       <textarea
         className="input"
-        placeholder="예) 둘이서 2만원 이하로 안 매운 치킨 빨리"
+        placeholder="예) 둘이서 안 매운 걸로 3만원"
         value={message}
         maxLength={300}
         onChange={(e) => setMessage(e.target.value)}

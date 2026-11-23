@@ -197,7 +197,8 @@ def start_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart
 @router.get("/runs/{request_id}/yogiyo-cart", summary="O-14 요기요 장바구니 담기 결과")
 def get_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
     svc.check_owner(user_id, request_id)
-    return cart.latest(request_id) or {"status": "NONE"}
+    # 담기가 꺼져 있으면(YOGIYO_CART_MODE=off) OFF: 화면이 '요기요 확인 전'이라고 승인을 막지 않게 (이슈 #64)
+    return cart.latest(request_id) or {"status": "NONE" if cart.enabled else "OFF"}
 
 
 @router.post("/runs/{request_id}/candidate-views", summary="(로컬 확장) 후보 화면에 실제로 보인 후보 기록")

@@ -15,7 +15,7 @@ import {
 import { Banner, Button, Row, Screen, Tag } from "../components/ui";
 import { clock, krw, secondsLeft, unverifiedTexts } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import YogiyoCart, { cartBlockReason, useYogiyoCart } from "../components/YogiyoCart";
+import YogiyoCart, { cartBlockReason, useAutoStartCart, useYogiyoCart } from "../components/YogiyoCart";
 import { useIsMutating } from "@tanstack/react-query";
 
 export default function Approval({ view, busy, send, cancel }: StepProps) {
@@ -44,6 +44,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
   const expired = left === 0;
   const unverified = unverifiedTexts(unverified_conditions);
   const cart = useYogiyoCart(view.request_id);
+  useAutoStartCart(view.request_id);
   const starting = useIsMutating({ mutationKey: ["yogiyo-cart-start", view.request_id] }) > 0;
   const cartBlock = cartBlockReason(cart.data, starting);
   // NFC 태그는 카드 결제일 때만 받는다. 지역화폐 단독 결제는 카드가 없으니 태그 없이 바로 결제하고,
@@ -106,7 +107,15 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
             </Button>
           )}
           <Button onClick={approve} disabled={busy || expired || !!cartBlock || waiting}>
-            {busy ? "결제 요청 중…" : waiting ? "카드를 대 주세요…" : needsTap ? "승인하고 카드 태그" : "승인하고 결제"}
+            {busy
+              ? "결제 요청 중…"
+              : waiting
+                ? "카드를 대 주세요…"
+                : cartBlock && cart.data?.status !== "FAILED"
+                  ? "요기요 확인 중…"
+                  : needsTap
+                    ? "승인하고 카드 태그"
+                    : "승인하고 결제"}
           </Button>
         </>
       }
@@ -175,7 +184,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
         </Banner>
       )}
       <YogiyoCart requestId={view.request_id} />
-      {cartBlock && <Banner tone="bad">{cartBlock}</Banner>}
+      {cartBlock && <Banner tone={cart.data?.status === "FAILED" ? "bad" : "pri"}>{cartBlock}</Banner>}
       {tapping && (
         <Banner tone="pri">결제할 NFC 카드({order.payment_method.name})를 휴대폰 뒷면에 대 주세요</Banner>
       )}
