@@ -296,3 +296,10 @@ def test_신한카드_3장_규칙_값():
                      rules["PRD-CARD-B"], 20000, shop).reason_codes == ["PERFORMANCE_NOT_MET"]
     assert calculate(PaymentMethod("X", "PRD-CARD-C", "CARD", monthly_performance_krw=299999),
                      rules["PRD-CARD-C"], 20000, shop).reason_codes == ["PERFORMANCE_NOT_MET"]
+
+
+def test_서울페이_이름():
+    from app.modules.benefit import products
+    names = {m.payment_method_id: m.name for methods in ledger.MOCK_USERS.values() for m in methods}
+    assert names["LOCAL001"] == names["LOCAL101"] == "서울페이(서울사랑상품권)"
+    assert products.CARD_PRODUCTS["PRD-LOCAL-A"]["product_name"] == "서울페이(서울사랑상품권)"

@@ -11,9 +11,9 @@ SEED = [
     ("CARD001", "U001", "PRD-CARD-A", "CARD", "요기요 신한카드 체크", None, 350000),   # 조건 전월 20만원
     ("CARD002", "U001", "PRD-CARD-B", "CARD", "신한카드 구독 좋아요", None, 550000),   # 조건 전월 40만원
     ("CARD003", "U001", "PRD-CARD-C", "CARD", "신한카드 Deep On Platinum+", None, 350000),  # 조건 전월 30만원
-    ("LOCAL001", "U001", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", 120000, None),
+    ("LOCAL001", "U001", "PRD-LOCAL-A", "LOCAL_CURRENCY", "서울페이(서울사랑상품권)", 120000, None),
     ("CARD101", "U002", "PRD-CARD-A", "CARD", "요기요 신한카드 체크", None, 100000),
-    ("LOCAL101", "U002", "PRD-LOCAL-A", "LOCAL_CURRENCY", "가상 지역화폐", 1000, None),
+    ("LOCAL101", "U002", "PRD-LOCAL-A", "LOCAL_CURRENCY", "서울페이(서울사랑상품권)", 1000, None),
 ]
 
 

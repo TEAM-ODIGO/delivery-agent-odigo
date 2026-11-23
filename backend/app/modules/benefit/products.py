@@ -96,7 +96,7 @@ CARD_PRODUCTS: dict[str, dict] = {
         "source_url": f"{_SHINHAN}/credit/1188280_2207.html",
     },
     "PRD-LOCAL-A": {
-        "product_name": "가상 지역화폐",
+        "product_name": "서울페이(서울사랑상품권)",
         "card_kind": "지역화폐",
         "annual_fee": None,
         "issuance": None,
