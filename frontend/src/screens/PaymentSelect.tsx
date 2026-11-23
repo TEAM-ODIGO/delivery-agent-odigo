@@ -1,6 +1,7 @@
 // 04 결제수단 선택 — prompt.options / order / excluded / expires_at
 import { useState } from "react";
 import type { StepProps } from "../pages/RunPage";
+import { CardImage } from "../components/CardImage";
 import { Banner, Button, Row, Screen, Tag } from "../components/ui";
 import { clock, EXCLUDE_REASON, krw, secondsLeft } from "../lib/format";
 import { useNow } from "../lib/hooks";
@@ -117,16 +118,20 @@ export default function PaymentSelect({ view, busy, send, cancel }: StepProps) {
           >
             <div className="opt-head">
               <span className={`radio${sel ? " on" : ""}`} />
-              <span className="grow">
-                <b>{o.name}</b>
-                <Tag tone={o.rank === 1 ? "ok" : "pri"}>{o.rank === 1 ? "추천 1" : o.rank}</Tag>
+              <CardImage id={o.payment_method_id} name={o.name} type={o.method_type} />
+              {/* 모든 카드가 같은 짜임: 이름 / 할인 금액 / 할인 이유, 오른쪽에 순위와 결제금액 */}
+              <span className="opt-body">
+                <b className="opt-name">{o.name}</b>
+                <span className="opt-desc muted small">
+                  <span>{o.instant_discount_krw > 0 ? `즉시할인 −${krw(o.instant_discount_krw)}` : "할인 없음"}</span>
+                  {o.reasons[0] && <span>{o.reasons[0]}</span>}
+                </span>
               </span>
-              <span className="price">{splitting ? "나머지" : krw(o.charge_krw)}</span>
+              <span className="opt-side">
+                <Tag tone={o.rank === 1 ? "ok" : "pri"}>{o.rank === 1 ? "추천 1" : o.rank}</Tag>
+                <span className="price">{splitting ? "나머지" : krw(o.charge_krw)}</span>
+              </span>
             </div>
-            <span className="muted small opt-sub">
-              {o.instant_discount_krw > 0 ? `즉시할인 −${krw(o.instant_discount_krw)}` : "할인 없음"}
-              {o.reasons[0] ? ` · ${o.reasons[0]}` : ""}
-            </span>
           </button>
         );
       })}

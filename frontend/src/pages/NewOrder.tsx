@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, DEMO_ADDRESS, getUserToken } from "../api/client";
 import type { Action, CardTap, Delegation, PaymentMethod } from "../api/types";
+import { CardImage } from "../components/CardImage";
 import { Button, Screen, Tag } from "../components/ui";
 import CardTapEntry from "../components/CardTapEntry";
 import CardFlipModal from "../components/CardFlipModal";
@@ -247,7 +248,13 @@ function DelegationEditor({
       {loadingMethods && <span className="muted">불러오는 중…</span>}
       {methods.map((m) => (
         <label className="pm-row" key={m.payment_method_id}>
-          <input type="checkbox" checked={isOn(m.payment_method_id)} onChange={() => toggleMethod(m.payment_method_id)} />
+          <input
+            className="round"
+            type="checkbox"
+            checked={isOn(m.payment_method_id)}
+            onChange={() => toggleMethod(m.payment_method_id)}
+          />
+          <CardImage id={m.payment_method_id} name={m.name} type={m.type} long={64} />
           <span>
             <b>{m.name}</b>
             <span className="muted">
