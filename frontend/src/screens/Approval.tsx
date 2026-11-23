@@ -12,7 +12,7 @@ import {
   readCardTap,
   savePendingTap,
 } from "../lib/nfc";
-import { Banner, Button, Row, Screen, Tag } from "../components/ui";
+import { Banner, Button, Row, Screen } from "../components/ui";
 import { clock, krw, secondsLeft, unverifiedTexts } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import YogiyoCart, { cartBlockReason, useAutoStartCart, useYogiyoCart } from "../components/YogiyoCart";
@@ -140,11 +140,11 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
         ))}
         <Row label="배달비" value={krw(order.delivery_fee_krw)} />
         {order.instant_discount_krw > 0 && (
-          <Row label={`${order.payment_method.name} 즉시할인`} value={`−${krw(order.instant_discount_krw)}`} tone="ok" />
+          <Row label={`${order.payment_method.name} 할인`} value={`−${krw(order.instant_discount_krw)}`} tone="ok" />
         )}
         <div className="divider" />
         <div className="title-row">
-          <b>결제 금액</b>
+          <b>내실 금액</b>
           <span className="big-price">{krw(order.charge_krw)}</span>
         </div>
         {split ? (
@@ -153,17 +153,16 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
             <Row label={`카드 · ${split.remainder.name ?? split.remainder.payment_method_id}`} value={krw(split.remainder.charge_krw)} />
           </>
         ) : (
-          <span className="muted">결제수단 {order.payment_method.name}</span>
+          <span className="muted">{order.payment_method.name}(으)로 결제해요</span>
         )}
       </div>
 
       {checks.length > 0 && (
         <>
-          <div className="section-title">확인한 조건</div>
+          <div className="section-title">말씀하신 조건에 맞는지 확인했어요</div>
           {checks.map((c) => (
             <div className="check-row" key={c}>
               <span>✓ {c}</span>
-              <Tag tone="ok">D 검증</Tag>
             </div>
           ))}
         </>
@@ -171,7 +170,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
 
       {unverified.length > 0 && (
         <>
-          <div className="section-title">확인 못 한 조건</div>
+          <div className="section-title">확인하지 못한 부분</div>
           {unverified.map((u) => (
             <Banner key={u}>{u}</Banner>
           ))}
