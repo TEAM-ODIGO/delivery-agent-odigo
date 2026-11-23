@@ -61,10 +61,15 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
   // 조건에 맞는 후보가 화면에 있으면 채운 근접 후보는 접어 둔다 (맞는 후보가 모두 주문 불가로 확인되면 펼쳐 보인다)
   const [showMore, setShowMore] = useState(false);
   const mainList = list.filter((c) => !c.near_miss_fill);
-  const extraList = list.filter((c) => c.near_miss_fill);
+  // 조건을 조금 벗어난 가게는 지금 주문할 수 있는(요기요 확인 통과) 가게를 먼저 (이슈 #64). 같은 안에서는 원래 순서
+  const extraList = list
+    .filter((c) => c.near_miss_fill)
+    .sort((a, b) => Number(!isOrderable(a)) - Number(!isOrderable(b)));
   const mainOrderable = mainList.some(isOrderable);
   const collapsed = mainOrderable && extraList.length > 0 && !showMore;
-  const shown = collapsed ? mainList : list;
+  // 주문 가능한 가게 먼저, 같은 안에서는 조건 맞는 가게 → 조건 벗어난 가게 (정렬은 안정 정렬이라 원래 순서 유지)
+  const ordered = [...mainList, ...extraList].sort((a, b) => Number(!isOrderable(a)) - Number(!isOrderable(b)));
+  const shown = collapsed ? mainList : ordered;
   const orderable = shown.filter(isOrderable);
   // 화면에 실제로 보이는 개수로 안내한다 (실시간 확인 결과에 따라 숨는 후보가 있어서)
   const nearNotice =
@@ -76,7 +81,7 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
   // 화면에 실제로 보인 후보를 기록한다 (이슈 #48, 점주 대시보드의 '화면 표시' 수).
   // 실시간 확인 결과가 오는 동안 목록이 바뀌므로 1.5초 그대로일 때만 보내고, 실패해도 화면에는 알리지 않는다.
   const rendered = [
-    ...(mainOrderable ? mainList : list).map((c) => ({ c, collapsed: false })),
+    ...(mainOrderable ? mainList : ordered).map((c) => ({ c, collapsed: false })),
     ...(mainOrderable && showMore ? extraList.map((c) => ({ c, collapsed: true })) : []),
   ];
   const viewKey = JSON.stringify(rendered.map(({ c, collapsed }) => [c.index, collapsed, liveOf(c)?.status ?? null]));
@@ -155,7 +160,7 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
         ) : (
           <Banner tone="warn">지금 조건으로는 주문할 수 있는 가게가 없어요. 금액이나 인원을 바꿔 다시 주문해 주세요.</Banner>
         ))}
-      {(mainOrderable ? mainList : list).map((c) => (
+      {(mainOrderable ? mainList : ordered).map((c) => (
         <CandidateCard
           key={c.index}
           c={c}

@@ -234,7 +234,8 @@ export type YogiyoCartStatus =
   | "RUNNING"
   | "CART_READY"
   | "CART_MISMATCH"
-  | "FAILED";
+  | "FAILED"
+  | "OFF"; // 담기가 꺼져 있음 (YOGIYO_CART_MODE=off)
 
 export interface YogiyoCartItem {
   menu_id: number | string;

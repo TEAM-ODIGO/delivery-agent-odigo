@@ -79,8 +79,8 @@ async function call<T>(
 }
 
 export const DEMO_ADDRESS = {
-  label: "서울특별시 중구 세종대로 110 (서울시청)",
-  value: { region_code: "11140", lat: 37.5665868, lng: 126.97819753 },
+  label: "서울특별시 중구 을지로 지하42 (을지로입구역)",
+  value: { region_code: "11140", lat: 37.5660509, lng: 126.98237295 },
 };
 
 export const api = {

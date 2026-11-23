@@ -150,6 +150,11 @@ class CartService:
         self.executor = executor or default_executor()
         self.now = now
 
+    @property
+    def enabled(self) -> bool:
+        """요기요 장바구니 담기를 쓸 수 있는지 (YOGIYO_CART_MODE=off면 False)."""
+        return self.filler is not None
+
     # ------------------------------------------------------------------ 시작 (O-13)
     def start(self, *, request_id: str, user_id: str, quote: dict, message: str = "") -> dict:
         if self.filler is None:
