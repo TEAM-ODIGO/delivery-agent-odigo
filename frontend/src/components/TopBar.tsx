@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+// 새 주문(처음 화면)은 상단 바의 로고·ODIGO를 누르면 간다
 const MENU = [
-  { to: "/", label: "새 주문" },
   { to: "/settings", label: "결제 한도·자동 주문 설정" },
   { to: "/orders", label: "주문 내역" },
   { to: "/card", label: "내 카드 혜택" },
