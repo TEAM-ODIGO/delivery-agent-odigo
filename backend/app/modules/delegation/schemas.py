@@ -53,6 +53,8 @@ class Constraints(Strict):
     taste_preferences: list[Annotated[str, Field(max_length=20)]] = Field(
         default_factory=list, max_length=10
     )
+    # A 확장 조건 (이슈 #58): 브랜드로 말한 요청 ("맘스터치"). D 검증에는 쓰지 않고 기록용
+    brands: list[Annotated[str, Field(max_length=40)]] = Field(default_factory=list, max_length=10)
     # 배달 주소는 개인정보라 받기만 하고 저장·로그에서 뺀다 (exclude=True → model_dump에 안 나옴).
     delivery_address: Annotated[Any, Field(exclude=True)] = None
 

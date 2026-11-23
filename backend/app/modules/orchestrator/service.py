@@ -44,6 +44,7 @@ from app.modules.delegation.schemas import (
     PolicyCreate,
     RevokeRequest,
 )
+from app.modules.orchestrator import admin
 from app.modules.orchestrator.constants import (
     FINAL,
     PAYMENT_STARTED,
@@ -56,7 +57,7 @@ from app.modules.orchestrator.constants import (
     RunState,
     SyncStatus,
 )
-from app.modules.orchestrator.models import IdempotencyRecord, Run, RunEvent
+from app.modules.orchestrator.models import CandidateView, IdempotencyRecord, Run, RunEvent
 from app.modules.orchestrator.ports import (
     DiscoveryPort,
     OrderingPort,
@@ -64,7 +65,7 @@ from app.modules.orchestrator.ports import (
     PaymentResponseLost,
     RecommendationPort,
 )
-from app.modules.orchestrator.schemas import RunCreate
+from app.modules.orchestrator.schemas import RefundCreate, RunCreate
 
 CATALOG_VERSION = "CAT-V1"
 TRANSIENT = (TimeoutError, ConnectionError, httpx.TransportError)
@@ -320,6 +321,97 @@ class OrchestratorService:
             for m in res.get("results", [])
         ]
         return {"count": len(results), "results": results}
+
+    # ================================================================ 카드 혜택 화면 (로컬 확장, 팀 합의 전)
+    def card_dashboard(self, user_id: str, card_tap: dict) -> dict:
+        """결제 중이 아닐 때 NFC 카드를 대면: E로 어떤 가상카드인지 찾고 → C의 혜택 요약 + E의 최근 결제 3건.
+        주문(Run)을 만들거나 바꾸지 않는다 (읽기 전용). 카드 토큰은 기록하지 않는다."""
+        found = self._card_port("identify_card_tap")({"card_tap": card_tap})
+        if not found.get("matched"):
+            raise AppError(404, found.get("reason_code") or "NFC_CARD_NOT_REGISTERED",
+                           found.get("message") or "등록되지 않은 NFC 카드예요.")
+        payment_method_id = found["payment_method_id"]
+        summarize = getattr(self.c, "card_dashboard", None)
+        if summarize is None:
+            raise AppError(503, "CARD_DASHBOARD_UNAVAILABLE", "지금은 카드 혜택을 불러올 수 없어요.")
+        try:
+            summary = summarize(user_id, payment_method_id)
+        except AppError as exc:
+            if exc.code == "PAYMENT_METHOD_NOT_FOUND":  # 다른 사람 카드: 존재 여부를 알려 주지 않는다
+                raise AppError(403, "NFC_CARD_NOT_MINE", "내 결제수단에 등록된 카드가 아니에요.") from exc
+            raise
+        payments = self._card_port("list_card_payments")(user_id, payment_method_id, 3)
+        recent = [self._recent_payment(user_id, p) for p in payments.get("items", [])]
+        return {**summary, "recent_payments": recent}
+
+    def refund_payment(self, user_id: str, payment_id: str, body: RefundCreate,
+                       idempotency_key: str | None) -> dict:
+        """카드 혜택 화면의 환불 버튼 → E-05 (남은 금액 전부). 분할결제면 지역화폐 몫도 함께 돌려준다."""
+        payments = self._card_port("list_card_payments")(user_id, body.payment_method_id, 20)
+        target = next((p for p in payments.get("items", []) if p["payment_id"] == payment_id), None)
+        if target is None:
+            raise AppError(404, "PAYMENT_NOT_FOUND", "이 카드의 결제 내역을 찾을 수 없어요.")
+        amount = target.get("refundable_krw") or 0
+        if target.get("status") != "APPROVED" or amount <= 0:
+            raise AppError(409, "NOT_REFUNDABLE", "환불할 수 있는 금액이 없어요.",
+                           {"status": target.get("status")})
+        key = idempotency_key or f"O-REFUND-{uuid.uuid4().hex}"
+        refund = self._card_port("request_refund")(
+            payment_id,
+            {"user_id": user_id, "amount_krw": amount, "reason": body.reason or "카드 혜택 화면에서 환불"},
+            idempotency_key=key,
+        )
+        if refund.get("status") == "PENDING":  # E-05는 접수 응답 → E-06으로 처리 결과를 한 번 확인한다
+            try:
+                refund = self._card_port("get_refund")(payment_id, refund["refund_id"])
+            except AppError:
+                pass  # 결과 확인만 실패: 접수된 상태(PENDING)로 돌려준다
+        return {"payment_id": payment_id, **refund}
+
+    def _card_port(self, name: str) -> Callable[..., dict]:
+        fn = getattr(self.e, name, None)
+        if fn is None:
+            raise AppError(503, "PAYMENT_UNAVAILABLE", "결제 서버가 카드 혜택 화면을 지원하지 않아요.")
+        return fn
+
+    def _recent_payment(self, user_id: str, p: dict) -> dict:
+        run = self.session.get(Run, p.get("request_id")) if p.get("request_id") else None
+        ctx = (run.context or {}) if run is not None and run.user_id == user_id else {}
+        restaurant = (ctx.get("selected_candidate") or {}).get("restaurant") or {}
+        return {
+            "payment_id": p["payment_id"],
+            "request_id": p.get("request_id"),
+            "status": p.get("status"),
+            "charge_krw": p.get("charge_krw"),
+            "share_krw": p.get("share_krw", p.get("charge_krw")),
+            "refunded_krw": p.get("refunded_krw", 0),
+            "refundable_krw": p.get("refundable_krw", 0),
+            "split": bool(p.get("payments")),
+            "approved_at": p.get("approved_at"),
+            "created_at": p.get("created_at"),
+            "restaurant_name": restaurant.get("name"),
+            "message": run.message if ctx else None,
+        }
+
+    # ---- 관리자 대시보드 (이슈 #46, 읽기 전용) ----
+    def admin_summary(self) -> dict:
+        """O-17 오늘 운영 개요 + 조치할 주문."""
+        return admin.summary(self.session, self.now())
+
+    def _admin_load(self, request_id: str) -> Run:
+        run = self.session.scalars(select(Run).where(Run.request_id == request_id)).first()
+        if run is None:
+            raise AppError(404, "RUN_NOT_FOUND", "요청을 찾을 수 없습니다.")
+        return run
+
+    def admin_run_detail(self, request_id: str) -> dict:
+        """O-18 주문 상세 요약 (관리자)."""
+        return admin.detail(self._admin_load(request_id))
+
+    def admin_live_check(self, request_id: str) -> dict:
+        """O-19 후보 요기요 실시간 확인 결과 (관리자). O-15와 같은 내용, 주인 확인만 없음."""
+        run = self._admin_load(request_id)
+        return self.live_check_view(run.user_id, request_id)
 
     def list_audit_logs(self, request_id: str) -> dict:
         """O-12: 이 주문에 대해 D가 남긴 감사 로그 (D-09)."""
@@ -938,7 +1030,10 @@ class OrchestratorService:
         found = self._call(run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n}))
         cands = [{**c, "index": i} for i, c in enumerate(found.get("candidates", []))]
         cands = self._mark_min_order(run, cands, a["constraints"])
-        self._set_ctx(run, candidates=cands, tried_candidate_ids=[])
+        # 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 A가 주는 이유 (이슈 #37, 후보 화면 위 안내)
+        self._set_ctx(
+            run, candidates=cands, tried_candidate_ids=[], search_notice=found.get("search_notice")
+        )
         if self.live and cands:
             self._start_live_check(run)
         if not cands:
@@ -1517,6 +1612,45 @@ class OrchestratorService:
                 {"candidate_index": cand["index"], "reason": v["reason"]},
             )
 
+    def record_candidate_views(self, user_id: str, request_id: str, shown: list[dict]) -> dict:
+        """(로컬 확장, 이슈 #48) 후보 화면이 실제로 보여 준 후보를 남긴다.
+
+        실시간 확인으로 숨거나 '더 보기'로 접힌 후보가 있어 '후보 포함'과 '화면 표시'가 다르다.
+        후보 선택 단계에서만 남기고, 직전에 남긴 것과 같으면 다시 남기지 않는다 (화면이 여러 번 보내도 한 번).
+        주문 행은 바꾸지 않는다 (같은 순간의 후보 선택과 부딪히지 않게).
+        """
+        run = self._load(request_id, user_id)
+        if run.state != RunState.CANDIDATES_READY:
+            return {"recorded": False, "reason": "NOT_SELECTING"}
+        by_index = {c["index"]: c for c in (run.context or {}).get("candidates", [])}
+        items = []
+        for position, s in enumerate(shown, start=1):
+            cand = by_index.get(s["candidate_index"])
+            if cand is None:
+                continue
+            items.append(
+                {
+                    "candidate_id": cand.get("candidate_id"),
+                    "restaurant_id": cand["restaurant"].get("restaurant_id"),
+                    "position": position,
+                    "collapsed": bool(s.get("collapsed")),
+                    "live_status": s.get("live_status"),
+                }
+            )
+        if not items:
+            return {"recorded": False, "reason": "NO_CANDIDATE"}
+        last = self.session.scalars(
+            select(CandidateView)
+            .where(CandidateView.request_id == request_id)
+            .order_by(CandidateView.id.desc())
+            .limit(1)
+        ).first()
+        if last is not None and last.shown == items:
+            return {"recorded": False, "reason": "SAME_AS_BEFORE"}
+        self.session.add(CandidateView(request_id=request_id, shown=items, created_at=self.now()))
+        self.session.commit()
+        return {"recorded": True, "count": len(items)}
+
     def live_check_view(self, user_id: str, request_id: str) -> dict:
         """O-15. 후보별 요기요 실시간 확인 결과 (화면이 진행 중에 폴링)."""
         run = self._load(request_id, user_id)
@@ -1599,6 +1733,7 @@ class OrchestratorService:
     def _candidate_prompt(self, run: Run) -> dict:
         return {
             "type": "SELECT_CANDIDATE",
+            "search_notice": run.context.get("search_notice"),
             "candidates": [
                 {
                     "index": c["index"],
@@ -1611,6 +1746,10 @@ class OrchestratorService:
                     # 최소주문금액 미달이면 선택할 수 없다 (로컬 확장)
                     "orderable": not c.get("min_order"),
                     "min_order": c.get("min_order"),
+                    # 비슷한 메뉴로 고른 후보 (이슈 #37): {"level", "label"}
+                    "match": c.get("match"),
+                    # 조건에 맞는 가게가 모자라 채운 근접 후보 (이슈 #37): 화면은 '더 보기'로 접는다
+                    "near_miss_fill": bool(c.get("near_miss_fill")),
                     # 화면(와이어프레임 v0.3 03)이 보여 주는 값. A 후보에 있는 것만 그대로 전달한다
                     "restaurant": {
                         k: c["restaurant"].get(k)
@@ -1620,6 +1759,7 @@ class OrchestratorService:
                             "delivery_fee_krw",
                             "local_currency_merchant",
                             "local_currency_basis",
+                            "cuisine",
                         )
                     },
                     "items": [

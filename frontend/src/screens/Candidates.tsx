@@ -4,18 +4,44 @@
 //   아니오 → 주문을 취소하고 처음 화면으로 돌아간다.
 // 최소주문금액 미달(로컬 확장): orderable=false인 후보는 비활성으로 보이고 선택할 수 없다.
 //   카드 아래에 "최소주문금액이 맞지 않아서 주문이 불가합니다"를 보여 준다.
+// 근접 후보 채우기(이슈 #37): 조건에 맞는 가게가 모자라 채운 후보(near_miss_fill)는 "조건을 조금 벗어난 가게 N곳 더 보기"로 접어 둔다.
+// 비슷한 메뉴(이슈 #37): 요청한 메뉴 대신 비슷한 메뉴로 채웠으면 위에 이유(search_notice)를, 카드에 배지를 보인다.
 // 요기요 실시간 확인(O-15): 화면은 기다리지 않고 뜨고, 결과가 오는 대로 진행 바와 배지가 바뀐다.
 //   주문 불가로 확인된 후보는 숨기지 않고 제자리에 사유와 함께 비활성으로 보인다(selectable=false).
 //   고를 수 있는 후보가 3곳 되도록 다음 순번 후보가 아래에 나온다(visible).
 import { useEffect, useState } from "react";
 import type { StepProps } from "../pages/RunPage";
 import type { Candidate, LiveResult } from "../api/types";
+import { api } from "../api/client";
 import { LiveBadge, LiveCheckBar, useLiveCheck, useRecheckLive } from "../components/LiveCheck";
 import { Banner, Button, Modal, Screen, Tag } from "../components/ui";
 import { krw } from "../lib/format";
 
 const isOver = (c: Candidate) => c.violations.some((v) => v.code === "BUDGET_EXCEEDED");
 const MIN_ORDER_TEXT = "최소주문금액이 맞지 않아서 주문이 불가합니다";
+
+// 음식 종류(A의 CUISINES 키) → 카드 오른쪽 이미지 (public/images/cuisine)
+const CUISINE_IMAGES: Record<string, string> = {
+  치킨: "chicken",
+  피자: "pizza",
+  양식: "western",
+  버거: "burger",
+  중식: "chinese",
+  일식: "japanese",
+  "회/초밥": "sushi",
+  한식: "korean",
+  분식: "snack",
+  "찜/탕": "stew",
+  "족발/보쌈": "jokbal",
+  "고기/구이": "meat",
+  "도시락/죽": "lunchbox",
+  샐러드: "salad",
+  샌드위치: "sandwich",
+  아시안: "asian",
+  "카페/디저트": "cafe",
+};
+const cuisineImage = (cuisine?: string | null) =>
+  `/images/cuisine/${(cuisine && CUISINE_IMAGES[cuisine]) || "default"}.png`;
 const DEFAULT_SHOWN = 3; // 확인 결과가 오기 전에 보여 줄 후보 수 (예비 후보는 숨김)
 
 export default function Candidates({ view, busy, send, cancel, decline }: StepProps) {
@@ -32,8 +58,39 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
       ? all
       : all.slice(0, DEFAULT_SHOWN);
   const isOrderable = (c: Candidate) => c.orderable !== false && liveOf(c)?.selectable !== false;
-  const orderable = list.filter(isOrderable);
+  // 조건에 맞는 후보가 화면에 있으면 채운 근접 후보는 접어 둔다 (맞는 후보가 모두 주문 불가로 확인되면 펼쳐 보인다)
+  const [showMore, setShowMore] = useState(false);
+  const mainList = list.filter((c) => !c.near_miss_fill);
+  const extraList = list.filter((c) => c.near_miss_fill);
+  const mainOrderable = mainList.some(isOrderable);
+  const collapsed = mainOrderable && extraList.length > 0 && !showMore;
+  const shown = collapsed ? mainList : list;
+  const orderable = shown.filter(isOrderable);
+  // 화면에 실제로 보이는 개수로 안내한다 (실시간 확인 결과에 따라 숨는 후보가 있어서)
+  const nearNotice =
+    mainOrderable && extraList.length > 0
+      ? `조건에 딱 맞는 가게는 ${mainList.length}곳이에요. 조건을 조금 벗어난 가게 ${extraList.length}곳도 찾아 뒀어요.`
+      : null;
   const [picked, setPicked] = useState<number | null>(orderable[0]?.index ?? null);
+
+  // 화면에 실제로 보인 후보를 기록한다 (이슈 #48, 점주 대시보드의 '화면 표시' 수).
+  // 실시간 확인 결과가 오는 동안 목록이 바뀌므로 1.5초 그대로일 때만 보내고, 실패해도 화면에는 알리지 않는다.
+  const rendered = [
+    ...(mainOrderable ? mainList : list).map((c) => ({ c, collapsed: false })),
+    ...(mainOrderable && showMore ? extraList.map((c) => ({ c, collapsed: true })) : []),
+  ];
+  const viewKey = JSON.stringify(rendered.map(({ c, collapsed }) => [c.index, collapsed, liveOf(c)?.status ?? null]));
+  useEffect(() => {
+    if (rendered.length === 0) return;
+    const shown = rendered.map(({ c, collapsed }) => ({
+      candidate_index: c.index,
+      collapsed,
+      live_status: liveOf(c)?.status ?? null,
+    }));
+    const timer = setTimeout(() => api.recordCandidateViews(view.request_id, shown).catch(() => undefined), 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.request_id, viewKey]);
   const chosen = orderable.find((c) => c.index === picked) ?? orderable[0];
   const nothingOrderable = list.length > 0 && orderable.length === 0;
   const allClosedOnYogiyo = !!lc?.all_unavailable;
@@ -83,6 +140,13 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
       }
     >
       {view.notice && <Banner tone="warn">{view.notice.message}</Banner>}
+      {((prompt?.type === "SELECT_CANDIDATE" && prompt.search_notice) || nearNotice) && (
+        <Banner tone="pri">
+          {prompt?.type === "SELECT_CANDIDATE" && prompt.search_notice}
+          {prompt?.type === "SELECT_CANDIDATE" && prompt.search_notice && nearNotice ? " " : ""}
+          {nearNotice}
+        </Banner>
+      )}
       {consent && <Banner tone="pri">예산을 넘는 가게로 계속 진행해요. 결제 전에 금액을 한 번 더 확인해 드려요.</Banner>}
       {lc && <LiveCheckBar lc={lc} onRecheck={() => recheck.mutate()} rechecking={recheck.isPending} />}
       {nothingOrderable &&
@@ -91,7 +155,7 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
         ) : (
           <Banner tone="warn">지금 조건으로는 주문할 수 있는 가게가 없어요. 금액이나 인원을 바꿔 다시 주문해 주세요.</Banner>
         ))}
-      {list.map((c) => (
+      {(mainOrderable ? mainList : list).map((c) => (
         <CandidateCard
           key={c.index}
           c={c}
@@ -100,6 +164,23 @@ export default function Candidates({ view, busy, send, cancel, decline }: StepPr
           onClick={() => setPicked(c.index)}
         />
       ))}
+      {mainOrderable && extraList.length > 0 && (
+        <>
+          <button className="more-toggle" onClick={() => setShowMore((v) => !v)} aria-expanded={showMore}>
+            {showMore ? "조건을 조금 벗어난 가게 접기" : `조건을 조금 벗어난 가게 ${extraList.length}곳 더 보기`}
+          </button>
+          {showMore &&
+            extraList.map((c) => (
+              <CandidateCard
+                key={c.index}
+                c={c}
+                live={liveOf(c)}
+                selected={chosen?.index === c.index}
+                onClick={() => setPicked(c.index)}
+              />
+            ))}
+        </>
+      )}
 
       {ask === "all" && (
         <Modal
@@ -184,6 +265,8 @@ function CandidateCard({
   const liveBlocked = live?.selectable === false;
   const blocked = minOrderBlocked || liveBlocked;
   const minOrderText = c.violations.find((v) => v.code === "MIN_ORDER_NOT_MET")?.message ?? MIN_ORDER_TEXT;
+  // 비슷한 메뉴로 고른 이유 ("'마라탕' 대신 비슷한 '짬뽕'을 담았어요 …")
+  const similarReason = c.match ? c.reasons.find((r) => r.includes("대신") || r.includes("비슷한 가게")) : undefined;
   const violationText = c.violations
     .filter((v) => v.code !== "MIN_ORDER_NOT_MET")
     .map((v) => v.message)
@@ -191,7 +274,7 @@ function CandidateCard({
 
   return (
     <button
-      className={`card${selected && !blocked ? " selected" : ""}`}
+      className={`card has-deco${selected && !blocked ? " selected" : ""}`}
       onClick={onClick}
       aria-pressed={blocked ? undefined : selected}
       disabled={blocked}
@@ -212,8 +295,11 @@ function CandidateCard({
         ) : (
           <Tag tone="warn">조건 일부 벗어남</Tag>
         )}
+        {c.match?.label && <Tag tone="warn">{c.match.label}</Tag>}
         {local && <Tag tone="pri">{local}</Tag>}
         <LiveBadge r={live} />
+        {/* 태그 줄 기준으로 위치를 잡아서, 사진 아래쪽이 태그 줄과 같은 선에 온다 */}
+        <img className="card-deco" src={cuisineImage(r.cuisine)} alt="" aria-hidden="true" loading="lazy" />
       </div>
       {liveBlocked && <span className="small bad-text">{live?.reason ?? "지금 요기요에서 주문할 수 없어요"}</span>}
       {live?.status === "CHANGED" && live.changes.length > 0 && (
@@ -236,6 +322,7 @@ function CandidateCard({
       ) : (
         c.reasons[0] && <span className="muted small">{c.reasons[0]}</span>
       )}
+      {similarReason && <span className="small warn-text">{similarReason}</span>}
     </button>
   );
 }

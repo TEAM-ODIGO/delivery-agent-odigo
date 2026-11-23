@@ -294,6 +294,42 @@ def list_payments(db: Session, user_id: str, cursor: str | None, limit: int) -> 
     return {"items": items, "next_cursor": _encode_cursor(page[-1]) if len(rows) > limit else None}
 
 
+def list_card_payments(db: Session, user_id: str, payment_method_id: str, limit: int) -> dict:
+    """카드 혜택 화면용 (로컬 확장, 명세 밖): 결제수단 하나의 최근 결제.
+
+    E-04 응답 모양(명세)은 그대로 두고 따로 둔다. 분할결제는 이 결제수단이 낸 몫(share_krw)을 함께 준다.
+    """
+    if not 1 <= limit <= 20:
+        raise AppError(400, "VALIDATION_ERROR", "limit은 1~20이어야 합니다.", {"fields": [{"loc": "query.limit", "reason": "out_of_range"}]})
+    stmt = (
+        select(Payment)
+        .where(Payment.user_id == user_id)
+        .where(or_(Payment.payment_method_id == payment_method_id,
+                   Payment.local_currency_payment_method_id == payment_method_id))
+        .order_by(Payment.created_at.desc(), Payment.payment_id.desc())
+        .limit(limit)
+    )
+    items = []
+    for p in db.scalars(stmt).all():
+        item = payment_out(p)
+        item["created_at"] = _iso(p.created_at)
+        if p.local_currency_payment_method_id == payment_method_id:
+            item["share_krw"] = p.local_currency_charge_krw
+        elif p.local_currency_payment_method_id:
+            item["share_krw"] = p.charge_krw - (p.local_currency_charge_krw or 0)
+        else:
+            item["share_krw"] = p.charge_krw
+        item["refundable_krw"] = max(p.charge_krw - p.refunded_krw - _open_refund_krw(db, p.payment_id), 0) if p.status == "APPROVED" else 0
+        items.append(item)
+    return {"payment_method_id": payment_method_id, "items": items}
+
+
+def _open_refund_krw(db: Session, payment_id: str) -> int:
+    return sum(
+        r.amount_krw for r in db.scalars(select(Refund).where(Refund.payment_id == payment_id, Refund.status.in_(("PENDING", "UNKNOWN"))))
+    )
+
+
 # ---------------------------------------------------------------- E-05·E-06 환불
 def create_refund(db: Session, payment_id: str, body: dict, idem_key: str, refund_mode: str) -> dict:
     p = db.get(Payment, payment_id)

@@ -14,17 +14,25 @@ from fastapi.responses import RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
-from app.core.db import SessionLocal, init_db
+from app.core.db import SessionLocal, engine, init_db
 from app.core.errors import install_error_handlers
 from app.modules.benefit.catalog_source import use_db_restaurants, use_shared_restaurants
 from app.modules.benefit.router import router as benefit_router
 from app.modules.delegation.router import router as delegation_router
-from app.modules.discovery.loader import load_if_empty
+from app.modules.discovery.hours import ensure_column as ensure_hours_column
+from app.modules.discovery.hours import sync_from_csv as sync_hours
+from app.modules.discovery.loader import find_restaurant_csv, load_if_empty, sync_if_newer
 from app.modules.discovery.router import router as discovery_router
 from app.modules.orchestrator.router import router as orchestrator_router
 from app.modules.ordering.router import router as ordering_router
+from app.modules.owner.router import router as owner_router
 
 log = logging.getLogger("app")
+if not log.handlers:  # 따로 설정이 없으면 "app" 로그(INFO)도 uvicorn 로그처럼 터미널에 보이게
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    log.addHandler(_handler)
+    log.setLevel(logging.INFO)
 
 
 def reconcile_once() -> dict:
@@ -48,8 +56,11 @@ def prepare_catalog() -> None:
     """식당·메뉴 데이터(요기요 수집본)를 비어 있으면 적재하고, C가 같은 데이터를 읽게 연결한다."""
     if settings.use_fake_a and settings.use_fake_b:
         return  # 가짜 식당(app/fakes/catalog.py)을 쓰는 구성
+    ensure_hours_column(engine)  # 예전 DB에 영업시간 열 추가
     with SessionLocal() as s:
-        load_if_empty(s)
+        if load_if_empty(s) is None:
+            sync_if_newer(s)  # 재수집한 CSV가 더 새로우면 DB에 맞춤
+        sync_hours(s, find_restaurant_csv())  # CSV의 영업시간을 DB에 맞춤
     use_db_restaurants(SessionLocal)
 
 
@@ -75,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(delegation_router)
     app.include_router(discovery_router)  # A: /discovery/... (점검용 직접 호출. O는 함수로 호출)
     app.include_router(ordering_router)  # B: /ordering/... (점검용 직접 호출. O는 함수로 호출)
+    app.include_router(owner_router)  # 점주 대시보드 (이슈 #50, 읽기 전용)
     app.include_router(benefit_router)  # C: /benefit/... (관리자·점검용 직접 호출 + 모듈 간 함수 호출)
     use_shared_restaurants()  # C가 팀 공용 식당 데이터를 읽도록 연결
 

@@ -72,3 +72,19 @@ class IdempotencyRecord(Base):
     status_code: Mapped[int] = mapped_column(Integer)
     response: Mapped[dict[str, Any]] = mapped_column(JsonType)
     created_at: Mapped[datetime] = mapped_column(KstDateTime)
+
+
+class CandidateView(Base):
+    """후보 화면이 실제로 보여 준 후보 (이슈 #48, 추가만 함). 점주 대시보드의 '화면 표시' 수가 된다.
+
+    주문(orchestrator_run)과 따로 둔다: 화면이 보내는 기록이 주문 행을 바꾸면
+    같은 순간의 후보 선택과 낙관적 잠금이 부딪힌다.
+    shown: [{candidate_id, restaurant_id, position, collapsed, live_status}]
+    """
+
+    __tablename__ = "orchestrator_candidate_view"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("orchestrator_run.request_id"), index=True)
+    shown: Mapped[list[dict[str, Any]]] = mapped_column(JsonType)
+    created_at: Mapped[datetime] = mapped_column(KstDateTime, index=True)

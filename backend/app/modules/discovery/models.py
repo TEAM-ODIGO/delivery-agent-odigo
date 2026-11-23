@@ -68,3 +68,22 @@ class LlmCall(Base):
     latency_ms: Mapped[int] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(KstDateTime())
+
+
+class Exclusion(Base):
+    """검색에서 후보가 되지 못한 가게와 그 이유 (이슈 #48).
+
+    점주 대시보드가 '왜 빠졌는지'를 세는 데 쓴다.
+
+    음식 종류가 다른 가게는 남기지 않는다. reason 값은 search.exclusion_trace 참고.
+    """
+
+    __tablename__ = "a_exclusion"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(ForeignKey("a_request.request_id"), index=True)
+    search_round: Mapped[int] = mapped_column(Integer)
+    restaurant_id: Mapped[str] = mapped_column(String(64), index=True)
+    reason: Mapped[str] = mapped_column(String(40))
+    detail: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(KstDateTime(), index=True)

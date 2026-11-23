@@ -19,9 +19,15 @@ from app.core.config import settings
 from app.core.db import SessionLocal, get_session
 from app.core.errors import AppError
 from app.modules.cart.service import CartService, release_browser
-from app.modules.orchestrator.schemas import Reply, RunCreate
+from app.modules.orchestrator.schemas import (
+    CandidateViews,
+    CardDashboardRequest,
+    RefundCreate,
+    Reply,
+    RunCreate,
+)
 from app.modules.orchestrator.service import OrchestratorService
-from app.modules.orchestrator.wiring import cart_service, orchestrator_service
+from app.modules.orchestrator.wiring import cart_service, demo_tags_available, orchestrator_service
 
 router = APIRouter(prefix="/orchestrator", tags=["O · orchestrator"])
 
@@ -114,6 +120,16 @@ def list_payment_methods(svc: Service, user_id: UserId):
     return svc.list_payment_methods(user_id)
 
 
+@router.post("/card-taps/dashboard", summary="(로컬 확장) NFC 카드를 대면 내 카드 혜택 화면")
+def card_dashboard(body: CardDashboardRequest, svc: Service, user_id: UserId):
+    return svc.card_dashboard(user_id, body.card_tap.model_dump(exclude_none=True))
+
+
+@router.post("/payments/{payment_id}/refunds", summary="(로컬 확장) 카드 혜택 화면에서 결제 환불")
+def refund_payment(payment_id: str, body: RefundCreate, svc: Service, user_id: UserId, key: IdemKey):
+    return svc.refund_payment(user_id, payment_id, body, key)
+
+
 @router.get(
     "/admin/runs",
     summary="O-11 전체 주문 목록 (관리자)",
@@ -121,6 +137,43 @@ def list_payment_methods(svc: Service, user_id: UserId):
 )
 def admin_runs(svc: Service, limit: int = 100, state: str | None = None):
     return svc.list_runs(None, limit, state)
+
+
+@router.get(
+    "/admin/summary",
+    summary="O-17 오늘 운영 개요·조치할 주문 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_summary(svc: Service):
+    return svc.admin_summary()
+
+
+@router.get(
+    "/admin/runs/{request_id}",
+    summary="O-18 주문 상세 요약 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_run_detail(request_id: str, svc: Service):
+    return svc.admin_run_detail(request_id)
+
+
+@router.get(
+    "/admin/runs/{request_id}/live-check",
+    summary="O-19 후보 요기요 실시간 확인 결과 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_live_check(request_id: str, svc: Service):
+    return svc.admin_live_check(request_id)
+
+
+@router.get(
+    "/admin/runs/{request_id}/yogiyo-cart",
+    summary="O-20 요기요 장바구니 담기 결과 (관리자)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_yogiyo_cart(request_id: str, svc: Service, cart: Cart):
+    svc.admin_run_detail(request_id)  # 없는 주문이면 404
+    return cart.latest(request_id) or {"status": "NONE"}
 
 
 @router.get(
@@ -147,6 +200,13 @@ def get_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
     return cart.latest(request_id) or {"status": "NONE"}
 
 
+@router.post("/runs/{request_id}/candidate-views", summary="(로컬 확장) 후보 화면에 실제로 보인 후보 기록")
+def record_candidate_views(request_id: str, body: CandidateViews, svc: Service, user_id: UserId):
+    return svc.record_candidate_views(
+        user_id, request_id, [s.model_dump() for s in body.shown]
+    )
+
+
 @router.get("/runs/{request_id}/live-check", summary="O-15 후보 요기요 실시간 확인 결과")
 def get_live_check(request_id: str, svc: Service, user_id: UserId):
     return svc.live_check_view(user_id, request_id)
@@ -169,6 +229,12 @@ def get_run(request_id: str, svc: Service, user_id: UserId):
 )
 def list_events(request_id: str, svc: Service):
     return svc.list_events(request_id)
+
+
+@router.get("/demo-tags", summary="(로컬 확장) 시연 태그가 이 구성에서 동작하는지")
+def demo_tags():
+    """화면이 '시연 시나리오 넣기'(#품절·#결제미확정 …)를 보여 줄지 정한다 (이슈 #46)."""
+    return {"available": demo_tags_available()}
 
 
 @router.get("/health", summary="O-05 상태 확인")

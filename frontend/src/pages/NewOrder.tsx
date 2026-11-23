@@ -1,10 +1,13 @@
 // 01 주문 입력 + 01-1 맡길 범위
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, DEMO_ADDRESS, getUserToken } from "../api/client";
-import type { Action, Delegation, PaymentMethod } from "../api/types";
+import type { Action, CardTap, Delegation, PaymentMethod } from "../api/types";
+import { CardImage } from "../components/CardImage";
 import { Button, Screen, Tag } from "../components/ui";
+import CardTapEntry from "../components/CardTapEntry";
+import CardFlipModal from "../components/CardFlipModal";
 import { ACTION_LABEL, DEMO_TAGS, FAIL_TEXT, krw } from "../lib/format";
 import { useToast } from "../lib/hooks";
 
@@ -37,9 +40,24 @@ export default function NewOrder() {
   const [delegation, setDelegation] = useState<Delegation>(loadDelegation);
   const [editing, setEditing] = useState(false);
   const toast = useToast();
+  // 시연 태그가 이 서버 구성에서 동작할 때만 '시연 시나리오 넣기'를 보여 준다 (이슈 #46)
+  const demoTags = useQuery({ queryKey: ["demo-tags"], queryFn: api.demoTags, staleTime: 60_000 });
   const nav = useNavigate();
   const qc = useQueryClient();
   const methods = useQuery({ queryKey: ["payment-methods", getUserToken()], queryFn: api.paymentMethods });
+  // 결제 중이 아닐 때 댄 NFC 카드 (로컬 확장): 있으면 카드 모달을 띄운다
+  const [tappedCard, setTappedCard] = useState<CardTap | null>(null);
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const token = params.get("card_t"); // 아이폰: 카드 URL → /tap → 여기로 온다
+    if (!token) return;
+    setTappedCard({ token });
+    setParams({}, { replace: true }); // 주소창·방문 기록에 토큰을 남기지 않는다
+  }, [params, setParams]);
+  const closeCard = useCallback(() => {
+    setTappedCard(null);
+    qc.invalidateQueries({ queryKey: ["payment-methods"] }); // 환불했으면 남은 혜택 표시가 바뀐다
+  }, [qc]);
 
   const start = useMutation({
     mutationFn: () => api.startRun(message.trim(), delegation),
@@ -121,23 +139,28 @@ export default function NewOrder() {
         </span>
       </div>
 
-      <div className="demo">
-        <details>
-          <summary>시연 시나리오 넣기</summary>
-          <div className="chips">
-            {DEMO_TAGS.map((t) => (
-              <button
-                key={t.tag}
-                className="chip"
-                title={t.desc}
-                onClick={() => setMessage((m) => (m.includes(t.tag) ? m : `${m.trim()} ${t.tag}`.trim()))}
-              >
-                {t.tag} <span className="faint">&nbsp;{t.desc}</span>
-              </button>
-            ))}
-          </div>
-        </details>
-      </div>
+      <CardTapEntry onCard={setTappedCard} />
+      {tappedCard && <CardFlipModal cardTap={tappedCard} onClose={closeCard} />}
+
+      {demoTags.data?.available && (
+        <div className="demo">
+          <details>
+            <summary>시연 시나리오 넣기</summary>
+            <div className="chips">
+              {DEMO_TAGS.map((t) => (
+                <button
+                  key={t.tag}
+                  className="chip"
+                  title={t.desc}
+                  onClick={() => setMessage((m) => (m.includes(t.tag) ? m : `${m.trim()} ${t.tag}`.trim()))}
+                >
+                  {t.tag} <span className="faint">&nbsp;{t.desc}</span>
+                </button>
+              ))}
+            </div>
+          </details>
+        </div>
+      )}
       <Link to="/orders" className="nav-link">
         내 주문 보기 ›
       </Link>
@@ -225,7 +248,13 @@ function DelegationEditor({
       {loadingMethods && <span className="muted">불러오는 중…</span>}
       {methods.map((m) => (
         <label className="pm-row" key={m.payment_method_id}>
-          <input type="checkbox" checked={isOn(m.payment_method_id)} onChange={() => toggleMethod(m.payment_method_id)} />
+          <input
+            className="round"
+            type="checkbox"
+            checked={isOn(m.payment_method_id)}
+            onChange={() => toggleMethod(m.payment_method_id)}
+          />
+          <CardImage id={m.payment_method_id} name={m.name} type={m.type} long={64} />
           <span>
             <b>{m.name}</b>
             <span className="muted">

@@ -1,5 +1,5 @@
 // 화면은 O만 부른다 (/orchestrator/...). 개발 서버가 백엔드로 넘겨 준다(vite.config.ts).
-import type { AuditLog, Delegation, PaymentMethod, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView } from "./types";
+import type { AdminRunDetail, AdminSummary, AuditLog, CardDashboard, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView, OwnerDashboard, OwnerRestaurantRow } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -124,12 +124,52 @@ export const api = {
   // O-14 요기요 장바구니 담기 결과
   getYogiyoCart: (requestId: string) =>
     call<YogiyoCartJob>(`/orchestrator/runs/${requestId}/yogiyo-cart`),
+  // (로컬 확장) 후보 화면에 실제로 보인 후보 기록 (점주 대시보드의 '화면 표시' 수)
+  recordCandidateViews: (
+    requestId: string,
+    shown: { candidate_index: number; collapsed?: boolean; live_status?: string | null }[],
+  ) =>
+    call<{ recorded: boolean }>(`/orchestrator/runs/${requestId}/candidate-views`, {
+      method: "POST",
+      body: JSON.stringify({ shown }),
+    }),
   // O-15 후보 요기요 실시간 확인 결과
   getLiveCheck: (requestId: string) =>
     call<LiveCheckView>(`/orchestrator/runs/${requestId}/live-check`),
   // O-16 후보 요기요 실시간 다시 확인
   recheckLive: (requestId: string) =>
     call<LiveCheckView>(`/orchestrator/runs/${requestId}/live-check`, { method: "POST" }),
+  // (로컬 확장) NFC 카드를 대면 내 카드 혜택 화면
+  cardDashboard: (card_tap: CardTap) =>
+    call<CardDashboard>("/orchestrator/card-taps/dashboard", {
+      method: "POST",
+      body: JSON.stringify({ card_tap }),
+    }),
+  // (로컬 확장) 카드 혜택 화면의 환불 버튼 — 남은 금액 전부 환불
+  refund: (paymentId: string, paymentMethodId: string) =>
+    call<RefundResult>(`/orchestrator/payments/${paymentId}/refunds`, {
+      method: "POST",
+      idempotent: true,
+      body: JSON.stringify({ payment_method_id: paymentMethodId }),
+    }),
+  // (로컬 확장) 시연 태그(#품절·#결제미확정 …)가 이 서버 구성에서 동작하는지
+  demoTags: () => call<{ available: boolean }>("/orchestrator/demo-tags"),
+  // 점주 대시보드 (이슈 #50, 로컬 확장)
+  ownerRestaurants: (q = "") =>
+    call<{ results: OwnerRestaurantRow[] }>(`/owner/restaurants?q=${encodeURIComponent(q)}`),
+  ownerDashboard: (restaurantId: string, days: number) =>
+    call<OwnerDashboard>(`/owner/restaurants/${encodeURIComponent(restaurantId)}/dashboard?days=${days}`),
+  // O-17 (관리자) 오늘 운영 개요·조치할 주문
+  adminSummary: (token: string) => call<AdminSummary>("/orchestrator/admin/summary", { token }),
+  // O-18 (관리자) 주문 상세 요약
+  adminRunDetail: (token: string, requestId: string) =>
+    call<AdminRunDetail>(`/orchestrator/admin/runs/${requestId}`, { token }),
+  // O-19 (관리자) 후보 요기요 실시간 확인 결과
+  adminLiveCheck: (token: string, requestId: string) =>
+    call<LiveCheckView>(`/orchestrator/admin/runs/${requestId}/live-check`, { token }),
+  // O-20 (관리자) 요기요 장바구니 담기 결과
+  adminYogiyoCart: (token: string, requestId: string) =>
+    call<YogiyoCartJob>(`/orchestrator/admin/runs/${requestId}/yogiyo-cart`, { token }),
   // O-12 (관리자) — D-09 감사 로그
   auditLogs: (token: string, requestId: string) =>
     call<{ count: number; results: AuditLog[] }>(

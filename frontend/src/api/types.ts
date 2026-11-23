@@ -57,12 +57,18 @@ export interface Candidate {
     delivery_fee_krw: number | null;
     local_currency_merchant: boolean | null;
     local_currency_basis: "ASSUMED_FROM_VOUCHER" | "KOMSCO_MATCHED" | null;
+    // 음식 종류 (A의 CUISINES 키: 치킨, 피자, 한식 ...). 카드 오른쪽 이미지에 쓴다
+    cuisine?: string | null;
   };
   items: Item[];
   violations: { code: string; message: string | null }[];
   // 최소주문금액 미달이면 orderable=false (로컬 확장). min_order에 필요한 금액과 현재 주문 금액이 온다.
   orderable?: boolean;
   min_order?: { required_krw: number; order_krw: number } | null;
+  // 요청한 메뉴가 아니라 비슷한 메뉴로 고른 후보면 있다 (label 예: "비슷한 메뉴", "비슷한 맛(매운·국물)")
+  match?: { level: string; label: string | null } | null;
+  // 조건에 맞는 가게가 모자라 채운 근접 후보 (조건 30% 이내 초과). 화면은 '더 보기'로 접어 둔다
+  near_miss_fill?: boolean;
 }
 
 export interface MethodRef {
@@ -105,7 +111,8 @@ export interface OrderView {
 
 export type Prompt =
   | { type: "CLARIFICATION"; questions: Question[] }
-  | { type: "SELECT_CANDIDATE"; candidates: Candidate[] }
+  // search_notice: 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 그 이유 (예: "'마라탕'을 파는 ○○은 지금 영업시간이 아니에요…")
+  | { type: "SELECT_CANDIDATE"; candidates: Candidate[]; search_notice?: string | null }
   | {
       type: "SELECT_PAYMENT_METHOD";
       options: PaymentOption[];
@@ -285,4 +292,176 @@ export interface LiveCheckView {
   all_unavailable?: boolean;
   started_at?: string | null;
   results: LiveResult[];
+}
+
+// ---- 내 카드 혜택 화면 (로컬 확장, 팀 합의 전) ----
+export interface CardTier {
+  min_krw: number; // 전월 이용금액 문턱
+  cap_krw: number; // 그 구간의 배달 할인이 들어가는 월 한도
+}
+
+export interface CardBenefitLine {
+  title: string;
+  rate: string;
+  detail: string;
+  delivery: boolean;
+}
+
+export interface RecentPayment {
+  payment_id: string;
+  request_id: string | null;
+  status: string;
+  charge_krw: number;
+  share_krw: number; // 이 카드가 낸 몫 (분할결제가 아니면 charge_krw와 같다)
+  refunded_krw: number;
+  refundable_krw: number;
+  split: boolean;
+  approved_at: string | null;
+  created_at: string | null;
+  restaurant_name: string | null;
+  message: string | null;
+}
+
+export interface CardDashboard {
+  payment_method_id: string;
+  product_id: string;
+  type: "CARD" | "LOCAL_CURRENCY" | string;
+  name: string;
+  status: string;
+  benefit_rule_version: string;
+  product: {
+    product_name: string | null;
+    card_kind: string | null;
+    annual_fee: string | null;
+    issuance: string | null;
+    headline: string | null;
+    tier_label: string | null;
+    benefits: CardBenefitLine[] | null;
+    notes: string[] | null;
+    source_url: string | null;
+  };
+  checked_at: string | null;
+  monthly_benefit: {
+    cap_krw: number | null;
+    used_krw: number;
+    remaining_krw: number | null;
+    min_performance_krw: number;
+  };
+  performance: {
+    monthly_performance_krw: number;
+    basis: string | null;
+    eligible: boolean;
+    tiers: CardTier[];
+    current: CardTier | null;
+    next: CardTier | null;
+    to_next_krw: number | null;
+    message: string | null;
+  } | null;
+  balance_krw: number | null;
+  recent_payments: RecentPayment[];
+}
+
+export interface RefundResult {
+  payment_id: string;
+  refund_id: string;
+  status: "PENDING" | "REFUNDED" | "FAILED" | "UNKNOWN" | string;
+  amount_krw: number;
+}
+
+// ---- 관리자 대시보드 (이슈 #46) ----
+export type AdminAction = "PAYMENT_UNKNOWN" | "STUCK" | "REPEATED_FAILURE" | "FAILED" | "BLOCKED";
+
+export interface AdminRow extends RunRow {
+  user_id: string;
+  reason_codes: string[];
+}
+
+export interface AdminActionRow extends AdminRow {
+  action: AdminAction;
+  stuck_minutes?: number;
+}
+
+// O-17 오늘 운영 개요
+export interface AdminSummary {
+  date: string;
+  counts: {
+    started: number;
+    completed: number;
+    payment_unknown: number;
+    blocked: number;
+    failed: number;
+    cancelled: number;
+    in_progress: number;
+  };
+  top_reasons: { code: string; count: number }[];
+  by_step: { state: RunState; label: string; count: number }[];
+  actions: AdminActionRow[];
+  action_count: number;
+  stuck_minutes: number;
+}
+
+// O-18 주문 상세 요약
+export interface AdminRunDetail extends AdminRow {
+  constraints: Record<string, unknown> | null;
+  candidate_count: number;
+  selected: { restaurant_name: string | null; items: Item[]; estimated_total_krw: number | null } | null;
+  payment: {
+    payment_method_id: string | null;
+    menu_subtotal_krw: number | null;
+    delivery_fee_krw: number | null;
+    instant_discount_krw: number | null;
+    charge_krw: number | null;
+    payment_id: string | null;
+    payment_status: string | null;
+  } | null;
+  blocked: { reason_codes?: string[] } | null;
+  error: { code?: string; message?: string } | null;
+  notice: { message?: string } | null;
+}
+
+// 점주 대시보드 (이슈 #50)
+export interface OwnerRestaurantRow {
+  restaurant_id: string;
+  name: string;
+  category: string | null;
+  candidates_7d: number;
+}
+export interface OwnerFunnel {
+  candidates: number;
+  shown: number;
+  selected: number;
+  completed: number;
+}
+export interface OwnerNamedCount {
+  name: string;
+  count: number;
+}
+export interface OwnerAction {
+  code: string;
+  title: string;
+  detail: string;
+  count: number;
+}
+export interface OwnerDashboard {
+  restaurant: {
+    restaurant_id: string;
+    name: string;
+    category: string | null;
+    rating: number;
+    review_count: number;
+    min_order_krw: number;
+    base_delivery_fee_krw: number;
+    opening_hours: string | null;
+  };
+  period: { since: string; until: string; days: number };
+  funnel: OwnerFunnel;
+  previous: OwnerFunnel;
+  shown_unavailable: number;
+  exclusions: { reason: string; count: number }[];
+  closed_hours: number[];
+  requested: { foods: OwnerNamedCount[]; tastes: OwnerNamedCount[]; budget_per_person_median: number | null };
+  menus: { name: string; recommended: number; selected: number }[];
+  menu_quality: { mains: number; no_description: number; no_servings: number; no_spice: number };
+  actions: OwnerAction[];
+  demo_data: boolean;
 }

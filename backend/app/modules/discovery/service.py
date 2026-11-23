@@ -26,6 +26,7 @@ from app.modules.discovery.constants import (
     SOURCE_RULE,
     SOURCE_USER,
 )
+from app.modules.discovery.hours import filter_now
 from app.modules.discovery.extractor import (
     extract_by_rules,
     grounded_cuisine,
@@ -35,8 +36,10 @@ from app.modules.discovery.extractor import (
     has_hint,
     normalize_cuisine,
 )
-from app.modules.discovery.models import Candidate, ConstraintsHistory, DiscoveryRequest
+from app.modules.discovery.models import Candidate, ConstraintsHistory, DiscoveryRequest, Exclusion
 from app.modules.discovery.schemas import Constraints, ConstraintsPatch, CreateRequestBody, LlmExtraction, ordered_tastes
+from app.modules.discovery.brands import find_brands
+from app.modules.discovery.catalog_models import Restaurant
 from app.modules.discovery.search import search
 
 MESSAGE_MAX_LENGTH = 300
@@ -215,6 +218,7 @@ def create_request(db: Session, body: CreateRequestBody) -> dict:
     extraction = llm.extract_conditions(db, body.request_id, message)
     constraints, notes, source = _merge(rule_constraints, rule_notes, extraction, message)
     constraints["delivery_address"] = body.delivery_address.model_dump()
+    constraints["brands"] = find_brands(message, list(db.scalars(select(Restaurant.name))))
     constraints = Constraints.model_validate(constraints).model_dump()
 
     missing = _missing_slots(constraints)
@@ -288,7 +292,7 @@ def _patched_value(field_name: str, patch: ConstraintsPatch):
             })
         return normalized
 
-    if field_name in ("excluded_ingredients", "menu_keywords"):
+    if field_name in ("excluded_ingredients", "menu_keywords", "brands"):
         return _clean_words(value)
 
     if field_name == "taste_preferences":
@@ -360,7 +364,10 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
             "status": request.status,
         })
 
-    bodies, suggestions = search(db, request.constraints, top_n)
+    trace: list[dict] = []
+    bodies, suggestions = search(db, request.constraints, top_n, now=filter_now(), trace=trace)
+    # 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 그 이유 (이슈 #37, 화면 위 안내)
+    notice = bodies[0].pop("search_notice", None) if bodies else None
 
     # 선택 사항: LLM으로 첫 문장을 다듬는다. 실패하면 기본 문장 그대로
     facts = [" ".join(body["reasons"]) for body in bodies]
@@ -392,6 +399,10 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
         db.add(candidate)
         candidates.append(candidate)
 
+    # 후보가 되지 못한 가게와 이유 (이슈 #48, 점주 대시보드용)
+    for row in trace:
+        db.add(Exclusion(request_id=request_id, search_round=request.search_count, created_at=now, **row))
+
     request.status = RECOMMENDED if candidates else CONFIRMED
     request.updated_at = now
     db.commit()
@@ -402,6 +413,7 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
         "constraints_version": request.constraints_version,
         "candidates": [_candidate_json(c) for c in candidates],
         "relaxation_suggestions": suggestions,
+        "search_notice": notice,
     }
 
 

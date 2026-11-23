@@ -58,6 +58,15 @@ class PaymentPort(Protocol):  # E
 
     def verify_card_tap(self, body: Body) -> Body: ...  # NFC 실물 카드 태그 확인 (로컬 확장)
 
+    # ---- 카드 혜택 화면 (로컬 확장, 팀 합의 전) ----
+    def identify_card_tap(self, body: Body) -> Body: ...  # 태그한 카드가 어떤 가상카드인지
+
+    def list_card_payments(self, user_id: str, payment_method_id: str, limit: int = 3) -> Body: ...
+
+    def request_refund(self, payment_id: str, body: Body, *, idempotency_key: str) -> Body: ...  # E-05
+
+    def get_refund(self, payment_id: str, refund_id: str) -> Body: ...  # E-06
+
 
 class HttpPaymentPort:
     """진짜 E(또는 scripts/fake_e_server.py)를 HTTP로 부른다."""
@@ -100,6 +109,30 @@ class HttpPaymentPort:
         if r.status_code >= 400:
             raise _app_error(r)
         return r.json()
+
+    # ---- 카드 혜택 화면 (로컬 확장) ----
+    def _send(self, method: str, path: str, **kwargs) -> Body:
+        try:
+            r = self.http.request(method, path, headers={**self.headers, **kwargs.pop("headers", {})}, **kwargs)
+        except httpx.HTTPError as exc:
+            raise AppError(503, "PAYMENT_UNAVAILABLE", "E 응답 없음") from exc
+        if r.status_code >= 400:
+            raise _app_error(r)
+        return r.json()
+
+    def identify_card_tap(self, body: Body) -> Body:
+        return self._send("POST", "/internal/card-taps/identify", json=body)
+
+    def list_card_payments(self, user_id: str, payment_method_id: str, limit: int = 3) -> Body:
+        return self._send("GET", f"/internal/payment-methods/{payment_method_id}/payments",
+                          params={"user_id": user_id, "limit": limit})
+
+    def request_refund(self, payment_id: str, body: Body, *, idempotency_key: str) -> Body:
+        return self._send("POST", f"/payments/{payment_id}/refunds", json=body,
+                          headers={"Idempotency-Key": idempotency_key})
+
+    def get_refund(self, payment_id: str, refund_id: str) -> Body:
+        return self._send("GET", f"/payments/{payment_id}/refunds/{refund_id}")
 
     def get_by_execution(self, execution_id: str) -> Body:
         try:

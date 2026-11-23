@@ -94,7 +94,7 @@ def test_closed_candidate_is_hidden_and_cannot_be_selected(env, live):
     v = env.flow("CANDIDATES_READY", message=OK_MESSAGE + " #요기요닫힘")
     lc = _view(env, v)
     first = lc["results"][0]
-    assert first["status"] == "UNAVAILABLE" and "서비스 미제공" in first["reason"]
+    assert first["status"] == "UNAVAILABLE" and first["reason"] == "오늘 임시 휴무예요"
     # 주문 불가 후보는 사유와 함께 제자리에 보이되 못 고르고, 다음 순번이 빈자리를 채운다
     assert [r["visible"] for r in lc["results"]] == [True, True, True]
     assert [r["selectable"] for r in lc["results"]] == [False, True, True]
@@ -205,17 +205,24 @@ def test_real_cache_window(env):
     assert live._fresh_row("R-fake", now) is None  # fake 결과는 real에 안 씀
 
 
-def test_target_uses_catalog_base_fee():
+def test_target_uses_catalog_base_fee(tmp_path, monkeypatch):
+    from app.modules.livecheck import catalog
     from app.modules.livecheck.service import target_of
 
-    t = target_of(
-        {
-            "restaurant": {"restaurant_id": "355987", "name": "써브웨이", "delivery_fee_krw": 0},
-            "items": [{"menu_id": "845312757", "name": "칩", "unit_price_krw": 2100}],
-        }
-    )
+    # 실제 CSV는 재수집(scripts/recollect_catalog.py)으로 값이 바뀌므로 테스트용 CSV를 쓴다
+    csv_path = tmp_path / "1_식당.csv"
+    csv_path.write_text("식당id,기본배달비,최소주문금액\n355987,3400,14000\n", encoding="utf-8-sig")
+    monkeypatch.setattr(catalog, "DATA", csv_path)
+    catalog._rows.cache_clear()
+    try:
+        restaurant = {"restaurant_id": "355987", "name": "써브웨이", "delivery_fee_krw": 0}
+        items = [{"menu_id": "845312757", "name": "칩", "unit_price_krw": 2100}]
+        t = target_of({"restaurant": restaurant, "items": items})
+    finally:
+        catalog._rows.cache_clear()
     assert isinstance(t, CheckTarget) and t.items == [CheckItem("845312757", 2100, "칩")]
     assert t.expected_delivery_fee_krw == 3400  # 후보의 구간 배달비가 아니라 CSV 기본 배달비
+    assert t.expected_min_order_krw == 14000
 
 
 # ---------------------------------------------------------------- API (O-15 · O-16)
