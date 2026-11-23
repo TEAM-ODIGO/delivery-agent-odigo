@@ -155,7 +155,7 @@ A-05는 `data/1_식당.csv`의 `영업시간` 열(예: `17:00 ~ 03:00`)을 보�
   ```bash
   uv run python scripts/eval_recommend.py                        # 문장별 결과 + 요약
   uv run python scripts/eval_recommend.py --save before.json     # 저장 → 코드 바꾼 뒤 --compare before.json
-  uv run python scripts/compare_llm.py                           # 규칙 vs LLM(Ollama) 조건 추출 비교
+  uv run --env-file .env python scripts/compare_llm.py           # 규칙 vs LLM 조건 추출 비교
   ```
 
 ## 시연 전 데이터 새로 고치기 (식당·메뉴 재수집)
@@ -204,6 +204,31 @@ uv run python scripts/collect_catalog.py --write             # 방금 읽은 결
 - 디저트 단어(케이크·마카롱·와플·크로플·도넛·탕후루·요거트·크레페 등)는 카페/디저트 가게에서 찾는다.
 - '베라'·'배스킨'은 아이스크림, '설빙'은 빙수로 알아듣는다. 배스킨라빈스처럼 메뉴 이름에 '아이스크림'이 없어도
   '레디팩'·'파인트' 같은 이름으로 찾는다 (`constants.MENU_WORD_ALIASES`·`MENU_NAME_ALIASES`).
+
+## LLM: OpenRouter (이슈 #62)
+
+A의 조건 추출은 규칙이 먼저이고, LLM은 규칙이 비운 칸만 문장에 근거가 있을 때 채운다. LLM이 꺼져 있거나 실패해도 규칙으로 동작한다.
+기본 제공자는 OpenRouter API다 (OpenAI 방식, 모델은 설정으로 바꾼다). 로컬 Ollama도 `LLM_PROVIDER=ollama`로 그대로 쓸 수 있다.
+
+```bash
+# .env
+LLM_ENABLED=true
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...        # https://openrouter.ai/keys (커밋 금지, 키에 사용 한도 걸기)
+OPENROUTER_MODEL=kt/midm-k-3.0-pro          # 비교에서 가장 빠름 (코드 기본값은 openai/gpt-4.1-mini)
+OPENROUTER_FALLBACK_MODELS=openai/gpt-4.1-mini  # 주 모델이 오류를 내면 대신 (기본값)
+```
+
+- 대체 모델: 주 모델이 오류(서비스 중단·요청 제한 등)를 내면 OpenRouter가 `OPENROUTER_FALLBACK_MODELS`를 순서대로 시도한다 (요청은 한 번). 실제로 답한 모델이 `a_llm_call`에 남고, 대체됐으면 `(대체)`가 붙는다.
+- 느릴 때는 대체되지 않는다. `LLM_TIMEOUT_SECONDS`(기본 8초)가 지나면 규칙으로 넘어간다.
+
+- 확인: `curl localhost:8000/discovery/health` → `"llm": "UP"` (키가 맞는지만 보고 모델은 부르지 않는다). `NO_API_KEY`·`INVALID_KEY`·`DOWN`이면 규칙만 쓴다.
+- 조건 추출은 JSON 스키마를 강제하는 구조화 출력(`response_format: json_schema`, `provider.require_parameters`)으로 부른다.
+- 오류: 401·402(잔액 부족)·403은 바로 규칙으로, 429·5xx·깨진 JSON·시간 초과는 한 번 더 시도한다. 모든 호출은 `a_llm_call`에 남는다 (키는 남기지 않음).
+- 외부로 보내는 것은 주문 문장(과 추천 이유를 켰을 때 후보 사실 문장)뿐이다. 배달 주소·사용자 ID는 보내지 않는다.
+- 모델 고르기: `uv run --env-file .env python scripts/compare_llm.py --models openai/gpt-4.1-mini,openai/gpt-5-mini` → 모델별 실패 수·시간·조건 추출 결과를 나란히 보여 준다 (`cart_runs/compare-models-*.md`). 비용은 OpenRouter 대시보드에서 본다.
+- 배포 서버: EC2의 `.env`(배포 스크립트가 읽는 파일)에 위 네 줄을 직접 넣는다. GitHub에는 올리지 않는다.
+- CI·테스트는 실제 OpenRouter를 부르지 않는다 (`tests/discovery/test_openrouter.py`는 가짜 응답).
 
 ## C(혜택)와 함께 확인
 

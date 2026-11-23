@@ -6,15 +6,17 @@
                 (규칙이 비운 칸만, 문장에 근거가 있을 때만 LLM 값)
   3) LLM 우선  : 실험용. LLM이 낸 값을 그대로 믿으면 어떻게 되는지
 
-준비 (Mac, 한 번만):
-    brew install ollama        # 또는 https://ollama.com 에서 앱 설치
-    ollama serve               # 앱을 켰으면 생략
-    ollama pull qwen2.5:7b     # 약 4.7GB
+준비: .env에 LLM_PROVIDER=openrouter, OPENROUTER_API_KEY (이슈 #62)
+  (로컬 Ollama로 볼 때는 LLM_PROVIDER=ollama, ollama serve, ollama pull qwen2.5:7b)
 
 실행 (backend 폴더):
-    uv run python scripts/compare_llm.py                  # 기본 문장 20개
-    uv run python scripts/compare_llm.py "마라탕 1명 2만원" "치킨이랑 떡볶이 3명 5만원"
-    uv run python scripts/compare_llm.py --file my.txt     # 한 줄에 문장 하나
+    uv run --env-file .env python scripts/compare_llm.py                  # 기본 문장 20개
+    uv run --env-file .env python scripts/compare_llm.py "마라탕 1명 2만원" "치킨이랑 떡볶이 3명 5만원"
+    uv run --env-file .env python scripts/compare_llm.py --file my.txt     # 한 줄에 문장 하나
+    uv run --env-file .env python scripts/compare_llm.py --model openai/gpt-5-mini  # 모델 바꿔 보기
+
+모델 고르기 (OpenRouter 모델 여러 개를 같은 문장으로 돌려 조건 추출 결과·속도·실패 수를 나란히 본다):
+    uv run --env-file .env python scripts/compare_llm.py --models openai/gpt-4.1-mini,openai/gpt-5-mini
 
 - 서버 DB(dev.db)는 건드리지 않는다. data/ CSV로 임시 DB를 만들어 검색한다.
 - 영업시간 필터는 끈다 (시각에 따라 결과가 바뀌지 않게). --now 를 주면 지금 시각 기준으로 거른다.
@@ -118,25 +120,101 @@ def top_lines(bodies: list[dict], n: int = 3) -> list[str]:
     return out or ["(후보 없음)"]
 
 
+def compare_models(models: list[str], msgs: list[str], out: Path) -> int:
+    """OpenRouter 모델별 조건 추출 결과·시간·실패를 나란히 본다 (검색은 하지 않음)."""
+    settings = llm.get_settings()
+    settings.llm_provider = "openrouter"
+    status = llm.check_llm()
+    print(f"OpenRouter 상태: {status}")
+    if status != "UP":
+        print("키를 확인해 주세요 (.env의 OPENROUTER_API_KEY).")
+        return 1
+    tmp = Path(tempfile.mkdtemp()) / "models.db"
+    engine = make_engine(f"sqlite:///{tmp}")
+    init_db(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    stats = {m: {"fail": 0, "times": [], "changed": 0} for m in models}
+    md = [f"# OpenRouter 모델 비교 ({datetime.now():%Y-%m-%d %H:%M})", ""]
+    with sessions() as s:
+        for i, m in enumerate(msgs, 1):
+            rule, notes = extract_by_rules(m)
+            print(f"\n[{i}] {m}\n   규칙      : {short(rule)}")
+            md += [f"## {i}. {m}", "", f"- 규칙: {short(rule)}"]
+            for model in models:
+                settings.openrouter_model = model
+                started = time.monotonic()
+                extraction = llm.extract_conditions(s, f"MDL{i:03d}", m)
+                took = time.monotonic() - started
+                st = stats[model]
+                st["times"].append(took)
+                if extraction is None:
+                    st["fail"] += 1
+                    s.flush()
+                    last = s.query(llm.LlmCall).filter_by(request_id=f"MDL{i:03d}").order_by(
+                        llm.LlmCall.id.desc()).first()
+                    why = (last.error or "")[:120] if last else ""
+                    st.setdefault("errors", []).append(why)
+                    line = f"실패 (규칙만) — {why}"
+                else:
+                    merged, _, _ = _merge(rule, notes, extraction, m)
+                    st["changed"] += short(merged) != short(rule)
+                    line = short(merged)
+                print(f"   {model}: {line}  ({took:.1f}초)")
+                md.append(f"- {model} ({took:.1f}초): {line}")
+            md.append("")
+    lines = ["| 모델 | 실패 | 규칙과 달라진 문장 | 평균 | 최대 |", "|---|---:|---:|---:|---:|"]
+    for model, st in stats.items():
+        avg = sum(st["times"]) / len(st["times"])
+        lines.append(f"| {model} | {st['fail']} | {st['changed']} | {avg:.1f}초 | {max(st['times']):.1f}초 |")
+    print("\n" + "\n".join(lines))
+    for model, st in stats.items():
+        if st.get("errors"):
+            print(f"{model} 실패 이유 (첫 번째): {st['errors'][0]}")
+    md[2:2] = lines + [""]
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"compare-models-{datetime.now():%Y%m%d-%H%M}.md"
+    path.write_text("\n".join(md), encoding="utf-8")
+    print(f"기록: {path}  (비용은 OpenRouter 대시보드 Activity에서 확인)")
+    engine.dispose()
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="규칙 vs LLM 추천 비교")
     ap.add_argument("messages", nargs="*")
     ap.add_argument("--file", help="한 줄에 문장 하나")
     ap.add_argument("--now", action="store_true", help="지금 시각 기준으로 영업시간 필터 적용")
     ap.add_argument("--out", default="cart_runs")
+    ap.add_argument("--model", help="이 모델로 (OPENROUTER_MODEL·OLLAMA_MODEL 대신)")
+    ap.add_argument("--models", help="OpenRouter 모델 여러 개를 쉼표로 (예: openai/gpt-4.1-mini,openai/gpt-5-mini)")
     a = ap.parse_args()
+    settings = llm.get_settings()
+    if a.model:
+        if settings.llm_provider == "openrouter":
+            settings.openrouter_model = a.model
+        else:
+            settings.ollama_model = a.model
     msgs = a.messages or DEFAULT_MESSAGES
     if a.file:
         msgs = [
             x.strip() for x in Path(a.file).read_text(encoding="utf-8").splitlines() if x.strip()
         ]
 
+    if a.models:
+        models = [m.strip() for m in a.models.split(",") if m.strip()]
+        bad = [m for m in models if "/" not in m or " " in m]
+        if bad:
+            raise SystemExit(f"모델 이름은 '회사/모델' 모양이어야 해요: {bad} (여러 개는 쉼표로)")
+        return compare_models(models, msgs, Path(a.out))
+
     status = llm.check_llm()
-    print(f"LLM 상태: {status}")
+    print(f"LLM 상태: {status} ({settings.llm_provider}:{settings.model})")
     if status != "UP":
         why = {
             "DOWN": "Ollama가 꺼져 있어요 (ollama serve)",
             "MODEL_MISSING": "모델이 없어요 (ollama pull qwen2.5:7b)",
+            "NO_API_KEY": ".env에 OPENROUTER_API_KEY가 없어요",
+            "INVALID_KEY": "OpenRouter 키가 틀렸어요",
         }
         print(f"{why.get(status, status)}. 이대로면 2·3번이 규칙과 같게 나와요.")
 
@@ -151,7 +229,7 @@ def main() -> int:
     md = [
         f"# 규칙 vs LLM 추천 비교 ({datetime.now():%Y-%m-%d %H:%M})",
         "",
-        f"- LLM 상태: {status}",
+        f"- LLM 상태: {status} ({settings.llm_provider}:{settings.model})",
         "",
     ]
     changed = failed = 0
