@@ -7,7 +7,7 @@ import { useNavigate } from "react-router-dom";
 const MENU = [
   { to: "/settings", label: "내 카드·주문 설정" },
   { to: "/orders", label: "주문 내역" },
-  // '내 카드 혜택'은 설정 화면 카드 목록(⋮)과 겹쳐 메뉴에서 뺐다 (이슈 #72). /card 페이지는 NFC 카드 링크용으로 남는다
+  // '내 카드 혜택'은 설정 화면 카드 목록(⋮)과 겹쳐 메뉴에서 뺐다 (이슈 #72). /card 페이지는 #83에서 없앴다
 ];
 
 export default function TopBar() {

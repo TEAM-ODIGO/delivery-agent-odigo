@@ -1,12 +1,9 @@
 // 01 주문 입력 (결제 한도·자동 주문 설정은 ☰ 메뉴 → /settings, 이슈 #66)
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, DEMO_ADDRESS } from "../api/client";
-import type { CardTap } from "../api/types";
 import { Button, Screen, Tag } from "../components/ui";
-import CardTapEntry from "../components/CardTapEntry";
-import CardFlipModal from "../components/CardFlipModal";
 import { DEMO_TAGS, FAIL_TEXT, krw } from "../lib/format";
 import { loadDelegation } from "../lib/delegation";
 import { rememberMessage } from "../lib/lastMessage";
@@ -26,19 +23,14 @@ export default function NewOrder() {
   const demoTags = useQuery({ queryKey: ["demo-tags"], queryFn: api.demoTags, staleTime: 60_000 });
   const nav = useNavigate();
   const qc = useQueryClient();
-  // 결제 중이 아닐 때 댄 NFC 카드 (로컬 확장): 있으면 카드 모달을 띄운다
-  const [tappedCard, setTappedCard] = useState<CardTap | null>(null);
+  // 결제 중이 아닐 때 카드를 댄 경우 (아이폰: 카드 URL → /tap → 여기로 온다): 안내만 한다 (이슈 #83).
+  // 카드 혜택은 ☰ 메뉴 '내 카드·주문 설정'의 카드 옆 ⋮ 로 본다
   const [params, setParams] = useSearchParams();
   useEffect(() => {
-    const token = params.get("card_t"); // 아이폰: 카드 URL → /tap → 여기로 온다
-    if (!token) return;
-    setTappedCard({ token });
-    setParams({}, { replace: true }); // 주소창·방문 기록에 토큰을 남기지 않는다
-  }, [params, setParams]);
-  const closeCard = useCallback(() => {
-    setTappedCard(null);
-    qc.invalidateQueries({ queryKey: ["payment-methods"] }); // 환불했으면 남은 혜택 표시가 바뀐다
-  }, [qc]);
+    if (!params.has("tap") && !params.has("card_t")) return;
+    toast("카드는 결제할 때 대 주세요. 카드 혜택은 ☰ 메뉴 '내 카드·주문 설정'에서 볼 수 있어요.");
+    setParams({}, { replace: true }); // 주소창·방문 기록에 남기지 않는다
+  }, [params, setParams, toast]);
 
   const start = useMutation({
     mutationFn: () => api.startRun(message.trim(), delegation),
@@ -93,9 +85,6 @@ export default function NewOrder() {
           결제 한도 {krw(delegation.max_charge_krw)} · 바꾸기 ›
         </button>
       ) : null}
-
-      <CardTapEntry onCard={setTappedCard} />
-      {tappedCard && <CardFlipModal cardTap={tappedCard} onClose={closeCard} />}
 
       {demoTags.data?.available && (
         <div className="demo">

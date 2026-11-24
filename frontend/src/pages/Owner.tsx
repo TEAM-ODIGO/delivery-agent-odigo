@@ -39,7 +39,7 @@ export default function Owner() {
         <div>
           <h1>가게 리포트</h1>
           <p className="muted" style={{ margin: 0 }}>
-            오디고 추천에서 우리 가게가 어떻게 보였는지, 이번 주 무엇을 고치면 좋을지 알려 드려요.
+            ODIGO 추천에서 우리 가게가 어떻게 보였는지, 이번 주 무엇을 고치면 좋을지 알려 드려요.
           </p>
         </div>
         <div className="admin-bar">
