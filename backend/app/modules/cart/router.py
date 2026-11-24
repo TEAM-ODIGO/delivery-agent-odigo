@@ -84,3 +84,47 @@ def submit_result(job_id: str, body: ResultRequest, cart: Cart):
         url=body.url,
     )
     return cart.submit_result(job_id, r, screenshot)
+
+
+# ---------------------------------------------------------------- 요기요 실시간 확인 (LIVE_CHECK_MODE=remote, #80)
+class LiveResultItem(BaseModel):
+    index: int
+    restaurant_id: str
+    status: str = Field(max_length=20)
+    reason: str | None = None
+    page: dict[str, Any] | None = Field(default=None, description="식당 화면 원본 (서버가 저장·재판정)")
+    seconds: float | None = None
+    cached: bool = False
+
+
+class LiveResultRequest(BaseModel):
+    results: list[LiveResultItem] = Field(default_factory=list, max_length=50)
+    error: str | None = Field(default=None, max_length=500, description="작업기 전체 실패 사유")
+
+
+def _live():
+    from app.modules.orchestrator.wiring import live_check_service
+
+    return live_check_service()
+
+
+@router.post(
+    "/live-checks/claim",
+    summary="(로컬 확장, #80) PC 작업기: 대기 중인 요기요 실시간 확인 작업 하나 가져가기",
+)
+def claim_live_check(body: ClaimRequest):
+    job = _live().claim(body.worker)
+    if job is None:
+        return Response(status_code=204)  # 가져갈 작업 없음 (remote 모드가 아니어도 204)
+    return job
+
+
+@router.post(
+    "/live-checks/{job_id}/result",
+    summary="(로컬 확장, #80) PC 작업기: 요기요 실시간 확인 결과 올리기",
+)
+def submit_live_check(job_id: str, body: LiveResultRequest):
+    out = _live().submit(job_id, [r.model_dump() for r in body.results], body.error)
+    if not out["accepted"]:
+        raise AppError(409, "JOB_NOT_ACTIVE", "이미 끝났거나 시간이 지난 확인 작업입니다.", {"job_id": job_id})
+    return out

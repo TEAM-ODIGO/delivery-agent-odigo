@@ -100,6 +100,21 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
   결제 승인이 "확인 중"에서 멈추지 않게 하려는 것이다.
 - 장바구니는 PC에 뜬 크로미움 창 안에만 있다. 휴대폰 화면에는 담긴 메뉴·금액·캡처가 보인다 (요기요 앱 장바구니와 연동되지 않음).
 
+#### 후보 실시간 확인도 PC 작업기로 (`LIVE_CHECK_MODE=remote`, 이슈 #80)
+
+배포 서버에서 `real`로 두면 요기요가 막아 후보가 모두 "요기요 확인 못 함"이 되고, `fake`면 실제로 확인하지 않는다.
+그래서 "요기요 서비스 미제공" 가게가 후보 단계에서 걸러지지 않고 장바구니 담기에서야 드러났다.
+`remote`로 두면 같은 PC 작업기가 후보 식당도 확인한다 (작업기 실행 방법은 위와 같다, 따로 켤 것 없음).
+
+- 서버 `.env`: `LIVE_CHECK_MODE=remote` (재시작 필요)
+- 작업기는 확인 작업을 담기 작업보다 먼저 처리한다 (후보 화면이 기다리는 작업). 판정 규칙·15분 캐시는 real과 같다.
+  서버가 최근 15분 안에 확인한 식당은 작업에 `cached`로 실어 보내 작업기가 다시 열지 않는다.
+- 작업기 API: `POST /orchestrator/cart-worker/live-checks/claim` (없으면 204),
+  `POST /orchestrator/cart-worker/live-checks/{job_id}/result` (끝났거나 시간이 지난 작업이면 409 `JOB_NOT_ACTIVE`)
+- 작업기가 꺼져 있으면: `LIVE_CHECK_REMOTE_WAIT_SECONDS`(20초) 안에 안 가져가거나 `LIVE_CHECK_REMOTE_TIMEOUT_SECONDS`(90초) 안에
+  결과가 없으면 후보는 "요기요 확인 못 함"으로 넘어가고 고를 수 있다 (기존 규칙과 같음).
+- 확인 작업은 서버 프로세스 메모리에 둔다 (서버를 재시작하면 진행 중인 확인은 "확인 못 함"으로 끝난다).
+
 ## 관리자 대시보드 (O-17 ~ O-20, 이슈 #46)
 
 `/admin` 화면: **운영 개요 → 조치할 주문 → 주문 상세**. 관리자 토큰(`ADMIN_ACCESS_TOKEN`)이 필요하고 읽기 전용이다.
