@@ -190,6 +190,13 @@ table.data tr.sel td { background: var(--pri-soft); }
 .live-track i { display: block; height: 100%; background: var(--pri); transition: width .3s; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--pri); font-weight: 700; cursor: pointer; }
 .link-btn:disabled { color: var(--faint); cursor: default; }
+/* 확인이 끝난 뒤 목록 아래 작은 한 줄 (이슈 #68) */
+.live-note { display: flex; justify-content: flex-end; align-items: center; gap: 2px; margin-top: -4px; font-size: 12.5px; color: var(--faint); }
+/* 요기요 다시 확인 아이콘 (이슈 #68) */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #4b5563; cursor: pointer; }
+.icon-btn:hover:not(:disabled) { background: #fff; }
+.icon-btn:disabled { color: var(--faint); cursor: default; }
+.icon-btn.spinning svg { animation: spin 0.9s linear infinite; }
 .warn-text { color: var(--warn); }
 
 /* 내 카드 혜택 화면 (로컬 확장) */
@@ -270,6 +277,13 @@ table.data tr.row-bad td { background: var(--bad-soft); }
 .more-toggle:hover {
   background: var(--soft);
 }
+
+/* 후보 화면 당겨서 다른 가게 추천 (이슈 #68) */
+.pull-zone { display: flex; flex-direction: column; gap: 12px; user-select: none; }
+.pull-ind { display: flex; align-items: flex-end; justify-content: center; overflow: hidden; margin-top: -12px; transition: height 0.15s; }
+.pull-ind-inner { display: inline-flex; align-items: center; gap: 6px; padding-bottom: 10px; font-size: 13px; color: var(--sub); }
+.pull-ind-inner.spinning svg { animation: spin 0.9s linear infinite; }
+.pull-hint { margin: -2px 0 -4px; text-align: center; font-size: 13.5px; color: var(--sub); }
 
 /* 점주 대시보드 (이슈 #50) */
 .owner-select { width: 260px; padding: 9px 12px; font-size: 14px; }

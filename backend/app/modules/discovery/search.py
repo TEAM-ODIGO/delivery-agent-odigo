@@ -928,7 +928,8 @@ def build_tiers(constraints: dict) -> list[Tier]:
         return out
 
     cuisines = [True, False] if cuisine_from_dish(constraints) else [True]
-    taste_label = f"비슷한 맛({taste_labels(tastes)})" if tastes else None
+    # 화면 배지는 짧게 (이슈 #68): 어떤 맛인지(바삭한 등)까지는 쓰지 않는다
+    taste_label = "비슷한 맛" if tastes else None
     tiers = [Tier("EXACT", constraints, None)]
     if words and tastes:
         for keep in cuisines:
@@ -988,24 +989,33 @@ def sort_near_miss(evaluations: list[Evaluation], tastes: list[str]) -> list[Eva
     )
 
 
+def _eul(word: str) -> str:
+    """목적격 조사: 받침 있으면 '을', 없으면 '를' (한글이 아니면 '을(를)')."""
+    last = word.rstrip()[-1:] if word else ""
+    if not ("가" <= last <= "힣"):
+        return "을(를)"
+    return "을" if (ord(last) - 0xAC00) % 28 else "를"
+
+
 def missing_notice(constraints: dict, exact: list[Evaluation], found_exact: int) -> str | None:
-    """요청한 메뉴를 다 못 채웠을 때 화면 위에 보여 줄 한 문장."""
+    """요청한 메뉴를 다 못 채웠을 때 화면 위에 보여 줄 한 문장.
+
+    짧게 (이슈 #68): 영업시간이 아닌 가게가 있다는 것만 알리고 가게 이름·영업시간은 쓰지 않는다.
+    """
     keywords = constraints.get("menu_keywords") or []
     if not keywords:
         return None
     joined = ", ".join(keywords)
+    obj = f"'{joined}'{_eul(joined)}"
     if found_exact:
-        return f"'{joined}'을(를) 담을 수 있는 가게는 {found_exact}곳이에요. 나머지는 비슷한 메뉴예요."
+        return f"{obj} 담을 수 있는 가게는 {found_exact}곳이에요. 나머지는 비슷한 메뉴예요."
     closed = [e for e in exact if e.hard_exclusion == "CLOSED_NOW" and e.basket is not None and has_keyword(e.basket)]
     if closed:
-        names = ", ".join(
-            f"{e.restaurant.name}({e.restaurant.opening_hours})" for e in closed[:2]
-        ) + (f" 외 {len(closed) - 2}곳" if len(closed) > 2 else "")
-        return f"'{joined}'을(를) 파는 {names}은(는) 지금 영업시간이 아니에요. 대신 비슷한 메뉴를 골랐어요."
+        return f"{obj} 파는 가게가 지금 영업시간이 아니라 비슷한 메뉴로 골랐어요."
     selling = [e for e in exact if e.basket is not None and has_keyword(e.basket)]
     if selling:
-        return f"조건 안에서 '{joined}'을(를) 담을 수 있는 가게가 없어 비슷한 메뉴를 골랐어요."
-    return f"'{joined}'을(를) 파는 가게가 없어 비슷한 메뉴를 골랐어요."
+        return f"조건 안에서 {obj} 담을 수 있는 가게가 없어 비슷한 메뉴로 골랐어요."
+    return f"{obj} 파는 가게가 없어 비슷한 메뉴로 골랐어요."
 
 
 def similar_reason(tier: Tier, basket: Basket, keywords: list[str]) -> str | None:
@@ -1019,7 +1029,8 @@ def similar_reason(tier: Tier, basket: Basket, keywords: list[str]) -> str | Non
         if tier_fits(tier, Basket(lines=[(item, 1)], subtotal_krw=0, delivery_fee_krw=0)):
             pick = item.menu.name
             break
-    return f"'{joined}' 대신 비슷한 '{pick}'을(를) 담았어요 ({tier.label})." if pick else None
+    # 어떤 메뉴인지는 카드의 메뉴 줄에 이미 있으니 문장은 짧게 통일한다 (이슈 #68)
+    return f"'{joined}' 대신 비슷한 메뉴를 담았어요." if pick else None
 
 
 def exclusion_trace(evaluations: list[Evaluation], constraints: dict, chosen_ids: set[str],
@@ -1068,17 +1079,19 @@ def exclusion_trace(evaluations: list[Evaluation], constraints: dict, chosen_ids
 
 def search(
     db: Session, constraints: dict, top_n: int, now: datetime | None = None,
-    trace: list[dict] | None = None,
+    trace: list[dict] | None = None, exclude_restaurant_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """브랜드를 말했으면(constraints.brands) 그 브랜드 가게에서 먼저 찾고, 없으면 전체에서 찾아 그렇다고 알린다."""
     wanted = constraints.get("brands") or []
     if wanted:
-        bodies, suggestions = _search(db, constraints, top_n, now, trace=None, only_brands=wanted)
+        bodies, suggestions = _search(
+            db, constraints, top_n, now, trace=None, only_brands=wanted, exclude=exclude_restaurant_ids
+        )
         if bodies:
             if trace is not None:  # 제외 기록은 브랜드 가게만이 아니라 전체 기준으로 남긴다
-                _search(db, constraints, top_n, now, trace=trace)
+                _search(db, constraints, top_n, now, trace=trace, exclude=exclude_restaurant_ids)
             return bodies, suggestions
-    bodies, suggestions = _search(db, constraints, top_n, now, trace=trace)
+    bodies, suggestions = _search(db, constraints, top_n, now, trace=trace, exclude=exclude_restaurant_ids)
     if wanted and bodies:
         names = ", ".join(f"'{b}'" for b in wanted)
         bodies[0]["search_notice"] = f"{names} 매장은 지금 조건에 맞게 주문할 수 없어 다른 가게를 골랐어요."
@@ -1088,6 +1101,7 @@ def search(
 def _search(
     db: Session, constraints: dict, top_n: int, now: datetime | None = None,
     trace: list[dict] | None = None, only_brands: list[str] | None = None,
+    exclude: set[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """후보 JSON 목록과 완화 제안 목록을 돌려준다.
 
@@ -1099,6 +1113,8 @@ def _search(
     restaurants = list(db.scalars(select(Restaurant)))
     if only_brands:
         restaurants = [r for r in restaurants if brand_of(r.name) in only_brands]
+    if exclude:  # 재추천 (이슈 #68): 이미 보여 준 가게는 빼고
+        restaurants = [r for r in restaurants if r.restaurant_id not in exclude]
     menus_by_restaurant: dict[str, list[Menu]] = {}
     for menu in db.scalars(select(Menu).where(Menu.menu_type.in_(ORDERABLE_TYPES + SIDE_TYPES))):
         menus_by_restaurant.setdefault(menu.restaurant_id, []).append(menu)

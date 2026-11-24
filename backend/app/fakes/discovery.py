@@ -198,9 +198,12 @@ class FakeDiscovery:
         if r.status not in ("CONFIRMED", "RECOMMENDED"):
             raise AppError(409, "INVALID_STATUS", "조건 확정 전에는 탐색할 수 없습니다.")
         top_n = int(body.get("top_n") or 3)
+        exclude = set(body.get("exclude_restaurant_ids") or [])
         c = r.constraints
         found = []
         for rest in catalog.RESTAURANTS:
+            if rest.restaurant_id in exclude:
+                continue
             if c.get("cuisine") and rest.cuisine != c["cuisine"]:
                 continue
             if (
@@ -249,6 +252,9 @@ class FakeDiscovery:
             )
         cands.sort(key=lambda x: (not x["meets_all_constraints"], -x["score"]))
         cands = cands[:top_n]
+        if exclude and not cands:  # 재추천인데 더 없음: 지금 후보를 그대로 둔다 (이슈 #68)
+            return {"request_id": request_id, "status": "NO_CANDIDATES", "candidates": [],
+                    "relaxation_suggestions": [], "search_notice": None}
         for i, cand in enumerate(cands, start=1):
             cand["candidate_id"] = f"CAND{i:03d}"
             cand["rank"] = i

@@ -18,7 +18,7 @@ import { useNow } from "../lib/hooks";
 import YogiyoCart, { cartBlockReason, useAutoStartCart, useYogiyoCart } from "../components/YogiyoCart";
 import { useIsMutating } from "@tanstack/react-query";
 
-export default function Approval({ view, busy, send, cancel }: StepProps) {
+export default function Approval({ view, busy, send, back }: StepProps) {
   const now = useNow();
   const prompt = view.prompt;
   const [tapping, setTapping] = useState(false);
@@ -97,13 +97,14 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
       step={view.step}
       footer={
         <>
+          {/* 이전 (이슈 #68): 주문을 취소하고 같은 문장이 채워진 입력 화면으로 */}
           {waiting ? (
             <Button kind="secondary" onClick={stopTap}>
               태그 취소
             </Button>
           ) : (
-            <Button kind="secondary" onClick={cancel} disabled={busy}>
-              취소
+            <Button kind="secondary" onClick={back} disabled={busy}>
+              이전
             </Button>
           )}
           <Button onClick={approve} disabled={busy || expired || !!cartBlock || waiting}>
