@@ -53,6 +53,8 @@ export default function Candidates({ view, busy, send, decline, back, again }: S
   const live = useLiveCheck(view.request_id);
   const recheck = useRecheckLive(view.request_id);
   const lc = live.data && live.data.state !== "OFF" ? live.data : null;
+  // 요기요 실시간 확인이 끝나야 고를 수 있다 (이슈 #85). 확인 못 함으로 끝나도 고를 수 있고, 꺼져 있으면(OFF) 바로 고른다
+  const liveChecking = (!live.data && !live.isError) || live.data?.state === "RUNNING";
   const liveOf = (c: Candidate): LiveResult | undefined => lc?.results.find((r) => r.candidate_index === c.index);
   // 보일 후보: 확인 결과가 있으면 그 visible대로, 없으면 앞에서 3곳 (확인이 꺼져 있으면 전부)
   const list = lc
@@ -160,8 +162,8 @@ export default function Candidates({ view, busy, send, decline, back, again }: S
             <Button kind="secondary" onClick={back} disabled={busy}>
               이전
             </Button>
-            <Button disabled={!chosen || busy} onClick={choose}>
-              {busy && action === "select" ? "주문안 만드는 중…" : "이 가게로"}
+            <Button disabled={!chosen || busy || liveChecking} onClick={choose}>
+              {busy && action === "select" ? "주문안 만드는 중…" : liveChecking ? "요기요 확인 중…" : "이 가게로"}
             </Button>
           </>
         )

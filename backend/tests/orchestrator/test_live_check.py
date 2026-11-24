@@ -129,7 +129,7 @@ def test_all_closed_is_reported(env, live):
     assert not any(r["selectable"] for r in lc["results"])
 
 
-def test_checking_candidate_is_not_blocked_after_wait(env):
+def test_checking_candidate_is_blocked_until_check_ends(env):
     held = Held()
     live = _live(env, executor=held)
     env.svc = functools.partial(type(env).svc, env, live_check=live)
@@ -138,7 +138,14 @@ def test_checking_candidate_is_not_blocked_after_wait(env):
     assert lc["state"] == "RUNNING" and lc["done"] == 0
     assert {r["status"] for r in lc["results"]} == {"CHECKING"}
     assert len(held.jobs) == 1  # 저장 뒤에 한 번만 맡김
-    # 확인이 안 끝났어도 막지 않는다 (확인 못 한 후보는 장바구니 단계에서 다시 걸러짐)
+    # 확인이 안 끝났으면 고를 수 없다 (이슈 #85). 상태는 그대로
+    with pytest.raises(AppError) as e:
+        _select(env, v, 0)
+    assert e.value.status == 409 and e.value.code == "LIVE_CHECK_IN_PROGRESS"
+    assert env.get(v)["state"] == "CANDIDATES_READY"
+    # 확인이 끝나면 고를 수 있다
+    fn, args = held.jobs[0]
+    fn(*args)
     assert _select(env, v, 0)["state"] != "CANDIDATES_READY"
 
 
