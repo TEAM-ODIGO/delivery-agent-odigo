@@ -119,3 +119,34 @@ def test_admin_endpoints_need_admin_token(client, runs):
             client.get(path, headers={"Authorization": "Bearer dev-token-U001"}).status_code == 403
         )
     assert client.get("/orchestrator/admin/runs/NOPE", headers=ADMIN).status_code == 404
+
+
+# ---------------------------------------------------------------- 이슈 #94
+def test_summary_metrics_hourly_rankings_services(client, runs):
+    body = client.get("/orchestrator/admin/summary", headers=ADMIN).json()
+    m = body["metrics"]["today"]
+    assert (m["started"], m["completed"]) == (7, 1)
+    assert m["completion_rate"] == 14  # 1 / 7
+    assert m["avg_charge_krw"] and m["avg_charge_krw"] > 0
+    assert m["avg_order_seconds"] is not None and m["saved_krw"] >= 0
+    assert body["metrics"]["yesterday"]["started"] == 0
+    assert body["metrics"]["yesterday"]["completion_rate"] is None
+    assert len(body["hourly"]["today"]) == 24 and sum(body["hourly"]["today"]) == 7
+    assert sum(body["hourly"]["yesterday"]) == 0
+    r = body["rankings"]
+    assert r["restaurants"] and r["restaurants"][0]["count"] >= 1
+    assert r["payment_methods"] and r["payment_methods"][0]["count"] == 1
+    assert {s["key"] for s in body["services"]} == {"LIVE_CHECK", "YOGIYO_CART", "AI"}
+    assert all(s["status"] in {"OK", "WARN", "DOWN", "IDLE", "OFF"} for s in body["services"])
+
+
+def test_admin_events_feed(client, runs):
+    r = client.get("/orchestrator/admin/events", headers=ADMIN)
+    assert r.status_code == 200
+    events = r.json()["events"]
+    kinds = [e["kind"] for e in events]
+    assert "STARTED" in kinds and "COMPLETED" in kinds
+    assert events == sorted(events, key=lambda e: e["at"], reverse=True)
+    done = next(e for e in events if e["kind"] == "COMPLETED")
+    assert done["request_id"] == runs["done"] and done["charge_krw"]
+    assert client.get("/orchestrator/admin/events").status_code == 403

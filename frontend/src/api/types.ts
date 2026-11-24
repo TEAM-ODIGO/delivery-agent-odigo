@@ -410,6 +410,48 @@ export interface AdminSummary {
   actions: AdminActionRow[];
   action_count: number;
   stuck_minutes: number;
+  // 이슈 #94: 어제 같은 시각 비교 · 시간대별 · 순위 · 연결 상태
+  metrics: { today: AdminMetrics; yesterday: AdminMetrics };
+  hourly: { today: number[]; yesterday: number[] }; // 0~23시
+  rankings: {
+    restaurants: { name: string; count: number; category: string | null }[];
+    foods: { name: string; count: number }[];
+    payment_methods: { name: string; count: number }[];
+  };
+  services: AdminService[];
+}
+
+export interface AdminMetrics {
+  started: number;
+  completed: number;
+  completion_rate: number | null;
+  avg_charge_krw: number | null;
+  saved_krw: number;
+  avg_order_seconds: number | null;
+}
+
+export interface AdminService {
+  key: "LIVE_CHECK" | "YOGIYO_CART" | "AI";
+  label: string;
+  mode: string | null;
+  status: "OK" | "WARN" | "DOWN" | "IDLE" | "OFF";
+  note: string | null;
+  last_at: string | null;
+  worker_seen_at?: string | null;
+  latency_ms?: number | null;
+}
+
+// 운영 개요의 최근 주문 흐름 (이슈 #94)
+export interface AdminFeedEvent {
+  at: string;
+  request_id: string;
+  kind: "STARTED" | "AWAITING_APPROVAL" | "COMPLETED" | "PAYMENT_UNKNOWN" | "BLOCKED" | "FAILED" | "CANCELLED" | "REQUOTED";
+  restaurant_name: string | null;
+  message: string | null;
+  charge_krw: number | null;
+  saved_krw: number | null;
+  reason_codes: string[];
+  changes: { kind: string; name: string | null; from_krw: number; to_krw: number }[] | null;
 }
 
 // O-18 주문 상세 요약

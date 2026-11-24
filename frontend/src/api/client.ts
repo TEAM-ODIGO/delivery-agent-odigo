@@ -1,5 +1,5 @@
 // 화면은 O만 부른다 (/orchestrator/...). 개발 서버가 백엔드로 넘겨 준다(vite.config.ts).
-import type { AdminRunDetail, AdminSummary, AuditLog, CardAddBody, CardCatalog, CardDashboard, MyCardList, MyDataCard, MyDataConsent, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView, OwnerDashboard, OwnerRestaurantRow } from "./types";
+import type { AdminRunDetail, AdminSummary, AuditLog, CardAddBody, CardCatalog, CardDashboard, MyCardList, MyDataCard, MyDataConsent, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView, OwnerDashboard, OwnerRestaurantRow, AdminFeedEvent } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -179,8 +179,11 @@ export const api = {
     call<{ results: OwnerRestaurantRow[] }>(`/owner/restaurants?q=${encodeURIComponent(q)}`),
   ownerDashboard: (restaurantId: string, days: number) =>
     call<OwnerDashboard>(`/owner/restaurants/${encodeURIComponent(restaurantId)}/dashboard?days=${days}`),
-  // O-17 (관리자) 오늘 운영 개요·조치할 주문
+  // O-17 (관리자) 오늘 운영 개요·살펴볼 주문
   adminSummary: (token: string) => call<AdminSummary>("/orchestrator/admin/summary", { token }),
+  // (관리자, 이슈 #94) 운영 개요의 최근 주문 흐름
+  adminEvents: (token: string, limit = 30) =>
+    call<{ count: number; events: AdminFeedEvent[] }>(`/orchestrator/admin/events?limit=${limit}`, { token }),
   // O-18 (관리자) 주문 상세 요약
   adminRunDetail: (token: string, requestId: string) =>
     call<AdminRunDetail>(`/orchestrator/admin/runs/${requestId}`, { token }),
