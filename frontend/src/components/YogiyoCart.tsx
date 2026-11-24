@@ -85,7 +85,13 @@ export default function YogiyoCart({ requestId }: { requestId: string }) {
         같은 메뉴를 요기요 장바구니에 담아 금액을 맞춰 봐요. 요기요에서 주문·결제는 하지 않아요.
       </span>
 
-      {(active || status === "NONE") && <span className="muted">요기요에서 담는 중… (5~20초)</span>}
+      {(active || status === "NONE") && (
+        <span className="muted">
+          {data?.mode === "remote" && status === "QUEUED"
+            ? "요기요 담기 PC(작업기)가 가져가길 기다리는 중…"
+            : "요기요에서 담는 중… (5~20초)"}
+        </span>
+      )}
 
       {data && !active && status !== "NONE" && (
         <>

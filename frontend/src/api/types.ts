@@ -249,7 +249,7 @@ export interface YogiyoCartItem {
 export interface YogiyoCartJob {
   status: YogiyoCartStatus;
   job_id?: string;
-  mode?: "fake" | "real" | string;
+  mode?: "fake" | "real" | "remote" | string; // remote: PC 작업기가 담음
   restaurant_id?: string;
   cart_items?: YogiyoCartItem[];
   menu_subtotal_krw?: number | null;

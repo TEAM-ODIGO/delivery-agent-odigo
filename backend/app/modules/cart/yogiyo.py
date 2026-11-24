@@ -57,8 +57,10 @@ _CART_TEXT = """() => (document.querySelector('.cart') || {innerText: ''}).inner
 # 요기요 앞단 보안(Akamai)이 창 없는(headless) 브라우저를 막을 때 나오는 화면. 우회하지 않는다.
 _ACCESS_DENIED = """() => /Access Denied/i.test(document.title + ' ' + document.body.innerText)"""
 BLOCKED_MESSAGE = (
-    "요기요가 접속을 막았어요 (Access Denied). 창 없는(headless) 브라우저는 막히니 "
-    "YOGIYO_CART_HEADLESS=0 (창을 띄우는 모드)으로 실행해 주세요."
+    "요기요가 접속을 막았어요 (Access Denied). "
+    "창 없는(headless) 모드라면 YOGIYO_CART_HEADLESS=0으로 실행하고, "
+    "해외·클라우드 서버라면 접속 위치 때문이니 "
+    "YOGIYO_CART_MODE=remote(한국 PC 작업기)를 써 주세요."
 )
 _NOT_SERVING = """() => /요기요\\s*서비스가\\s*제공되지/.test(document.body.innerText)"""
 _VISIBLE_MODAL_TEXT = """() => [...document.querySelectorAll('.modal')]
@@ -119,6 +121,39 @@ def _guard(page) -> None:
 def _won(text: str, label: str) -> int | None:
     m = re.search(label + r"\s*([\d,]+)\s*원", text)
     return int(m.group(1).replace(",", "")) if m else None
+
+
+def delivery_fee_from_cart(cart: dict, subtotal_krw: int | None) -> tuple[int | None, int]:
+    """요기요 장바구니 원본(ngStorage-cart)의 가게 정보로 배달비를 계산한다 (이슈 #76).
+
+    주문표 화면 글자에는 배달비가 0원이면 '배달요금' 줄이 아예 없어서, 화면 대신 원본 값을 쓴다.
+    주문금액별 배달비(B 견적과 같은 규칙: 주문금액 이상인 구간 중 가장 높은 구간) → 없으면 기본 배달비,
+    무료배달 기준 금액 이상이면 0원, 지금 시간대 할증이 켜져 있으면 더한다.
+    반환: (배달비, 그중 시간대 할증). 계산할 수 없으면 (None, 0).
+    """
+    r = (cart or {}).get("restaurant") or {}
+    if subtotal_krw is None or not r:
+        return None, 0
+    tiers = r.get("delivery_fee_by_order_amounts") or (
+        ((r.get("serving_type") or {}).get("vd") or {}).get("delivery_fee_by_order_amounts")
+    ) or []
+    fee = None
+    for tier in sorted(tiers, key=lambda t: t.get("order_amount") or 0, reverse=True):
+        if subtotal_krw >= (tier.get("order_amount") or 0) and tier.get("delivery_fee") is not None:
+            fee = int(tier["delivery_fee"])
+            break
+    if fee is None and not tiers and r.get("delivery_fee") is not None:
+        fee = int(r["delivery_fee"])
+    threshold = r.get("free_delivery_threshold") or 0
+    if fee is not None and threshold and subtotal_krw >= threshold:
+        fee = 0
+    if fee is None:
+        return None, 0
+    surcharge = 0
+    for s in r.get("delivery_fee_surcharges") or []:
+        if str(s.get("serving_type") or "").upper() == "VD":
+            surcharge = int(((s.get("activated_surcharge") or {}).get("amount")) or 0)
+    return fee + surcharge, surcharge
 
 
 # ---------------------------------------------------------------- 브라우저 실행 (없으면 자동 설치)
@@ -273,8 +308,12 @@ async def _fill(
         result.menu_subtotal_krw = sum(
             (i["unit_price_krw"] or 0) * (i["quantity"] or 0) for i in result.cart_items
         )
-        result.delivery_fee_krw = _won(await page.evaluate(_CART_TEXT), "배달요금")
-        result.mismatches = _compare(order, result)
+        # 배달비: 장바구니 원본 값으로 계산하고, 못 하면 주문표 글자로 (이슈 #76)
+        fee, surcharge = delivery_fee_from_cart(cart, result.menu_subtotal_krw)
+        if fee is None:
+            fee, surcharge = _won(await page.evaluate(_CART_TEXT), "배달요금"), 0
+        result.delivery_fee_krw = fee
+        result.mismatches = _compare(order, result, surcharge)
         result.status = "CART_MISMATCH" if result.mismatches else "CART_READY"
     except Exception as exc:  # noqa: BLE001 — 실패도 결과로 남긴다 (캡처 포함)
         result.status = "FAILED"
@@ -346,7 +385,7 @@ async def _apply_options(page, wanted: list[str]) -> None:
             await page.locator(f"label[for='{oid}']").first.click()
 
 
-def _compare(order: CartOrder, r: CartResult) -> list[str]:
+def _compare(order: CartOrder, r: CartResult, surcharge_krw: int = 0) -> list[str]:
     out = []
     want = {it.menu_id: it.quantity for it in order.items}
     got = {i["menu_id"]: i["quantity"] for i in r.cart_items}
@@ -359,12 +398,16 @@ def _compare(order: CartOrder, r: CartResult) -> list[str]:
             f"메뉴 합계가 견적과 다름: 견적 {order.expected_menu_subtotal_krw}원, "
             f"요기요 {r.menu_subtotal_krw}원"
         )
-    if order.expected_delivery_fee_krw is not None and (
-        r.delivery_fee_krw != order.expected_delivery_fee_krw
+    # 요기요 배달비를 읽지 못했으면(None) '다름'으로 치지 않는다: 화면은 '확인 못 함'으로 보인다 (이슈 #76)
+    if (
+        order.expected_delivery_fee_krw is not None
+        and r.delivery_fee_krw is not None
+        and r.delivery_fee_krw != order.expected_delivery_fee_krw
     ):
+        note = f" (시간대 할증 {surcharge_krw:,}원 포함)" if surcharge_krw else ""
         out.append(
-            f"배달비가 견적과 다름: 견적 {order.expected_delivery_fee_krw}원, "
-            f"요기요 {r.delivery_fee_krw}원"
+            f"배달비가 견적과 다름: 견적 {order.expected_delivery_fee_krw:,}원, "
+            f"요기요 {r.delivery_fee_krw:,}원{note}"
         )
     return out
 
