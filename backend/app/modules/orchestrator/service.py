@@ -1715,7 +1715,8 @@ class OrchestratorService:
     def _check_live(self, run: Run, cand: dict) -> None:
         """고른 후보가 요기요에서 지금 주문 불가로 확인됐으면 거절한다 (409 CANDIDATE_UNAVAILABLE).
 
-        확인 중이면 그 식당 확인이 끝날 때까지 잠깐 기다린다. 확인하지 못한 후보는 막지 않는다.
+        확인 중이면 그 식당 확인이 끝날 때까지 잠깐 기다린다. 그래도 확인 중이면 409로 막는다 (이슈 #85:
+        화면은 확인이 끝나야 버튼을 켜고, 서버도 같은 규칙). 확인하지 못한 후보(오류·차단·건너뜀)는 막지 않는다.
         """
         if not self.live:
             return
@@ -1740,6 +1741,13 @@ class OrchestratorService:
                 "checked_at": v["checked_at"],
             },
         )
+        if v["status"] == "CHECKING":
+            raise AppError(
+                409,
+                "LIVE_CHECK_IN_PROGRESS",
+                "요기요에서 가게를 확인하고 있어요. 확인이 끝나면 골라 주세요.",
+                {"candidate_index": cand["index"]},
+            )
         if v["status"] == "UNAVAILABLE":
             raise AppError(
                 409,
