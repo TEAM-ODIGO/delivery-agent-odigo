@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { YogiyoCartJob } from "../api/types";
 import { krw } from "../lib/format";
-import { Banner, Button, Row, Tag } from "./ui";
+import { Banner, Button, RobotLoader, Row, Tag } from "./ui";
 
 const ACTIVE = new Set(["QUEUED", "RUNNING"]);
 
@@ -88,11 +88,13 @@ export default function YogiyoCart({ requestId, requotedJobId }: { requestId: st
       </span>
 
       {(active || status === "NONE") && (
-        <span className="muted">
-          {data?.mode === "remote" && status === "QUEUED"
-            ? "요기요 담기 PC(작업기)가 가져가길 기다리는 중…"
-            : "요기요에서 담는 중… (5~20초)"}
-        </span>
+        <RobotLoader
+          label={
+            data?.mode === "remote" && status === "QUEUED"
+              ? "요기요 담기 PC(작업기)가 가져가길 기다리는 중…"
+              : "요기요에서 담는 중… (5~20초)"
+          }
+        />
       )}
 
       {data && !active && status !== "NONE" && (
