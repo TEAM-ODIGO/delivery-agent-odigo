@@ -70,12 +70,35 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 - 모드는 `.env`의 `YOGIYO_CART_MODE`로 고른다 (`.env.example` 참고).
   - `fake`(기본): Playwright 없이 견적대로 담긴 것처럼 응답. 주문 문장에 `#요기요불일치`·`#요기요실패`를 넣으면 그 결과를 시연한다.
   - `real`: 진짜 요기요를 연다. 따로 설치할 것은 없다: Playwright는 `uv sync`로 설치되고, 크로미움 브라우저는 첫 담기 때 자동으로 받는다 (처음 한 번 1~2분). 설치된 Chrome을 쓰려면 `YOGIYO_CART_BROWSER=chrome`. 요기요 창이 뜨고(`YOGIYO_CART_HEADLESS=0`, 기본), 새 주문을 시작할 때까지 열려 있다 (`YOGIYO_CART_KEEP_BROWSER=1`, 기본). 다시 담기를 누르면 창을 새로 열어 처음부터 담는다.
+  - `remote`: 배포 서버용. 서버는 작업을 `QUEUED`로 쌓아 두고, 한국 PC의 작업기가 가져가서 진짜 요기요에 담는다 (아래 "배포 환경에서 진짜 요기요 담기").
   - `off`: 버튼을 누르면 503 `CART_DISABLED`.
 - 창 없는(headless) 브라우저는 요기요가 "Access Denied"로 막는다. 그래서 창을 띄우는 모드만 쓰고, 막히면 그 이유를 실패 사유로 알려 준다 (우회하지 않음).
 - 서버 없이 Playwright만 확인: `uv run python scripts/yogiyo_cart_try.py --find-open` (지금 열린 식당을 찾아 담기). 식당을 정하려면 `--restaurant`·`--item`, 열리는지만 보려면 `--check-only`.
 - 지금 요기요 주문을 받지 않는 가게("요기요 서비스가 제공되지 않습니다")는 바로 실패로 알려 준다.
 - 담긴 장바구니 원본은 캡처 옆 `{작업id}-cart.json`에 남는다 (요기요 형식이 바뀌었을 때 확인용).
 - 요기요 장바구니는 그 브라우저 탭 안에만 있다. 창을 닫으면 사라지므로 화면에는 캡처로 남긴다.
+
+### 배포 환경에서 진짜 요기요 담기 (remote 모드, PC 작업기)
+
+배포 서버(EC2, 해외 클라우드 IP)에서 요기요를 열면 창을 띄워도 Access Denied로 막힌다.
+우회하지 않고, 한국 PC가 대신 담는다.
+
+```
+휴대폰 → 배포 사이트 → 서버: 담기 작업 QUEUED
+                        ↑ 2초마다 확인(claim)        ↓ 결과·캡처 업로드
+               한국 PC 작업기 (scripts/cart_worker.py) → 요기요 (창을 띄운 크로미움)
+```
+
+- 서버 `.env`: `YOGIYO_CART_MODE=remote` (재시작 필요: `sudo systemctl restart odigo-backend`)
+- PC에서 작업기 실행 (backend 폴더):
+  `uv run python scripts/cart_worker.py --server https://<배포 주소> --token <서버의 INTERNAL_SERVICE_TOKEN>`
+  (또는 `.env`에 `YOGIYO_WORKER_SERVER`·`YOGIYO_WORKER_TOKEN`을 넣고 `uv run --env-file .env python scripts/cart_worker.py`)
+- 작업기 API (서비스 토큰 필요, 화면은 부르지 않음): `POST /orchestrator/cart-worker/jobs/claim` (작업 없으면 204),
+  `POST /orchestrator/cart-worker/jobs/{job_id}/result` (이미 끝난 작업이면 409 `CART_JOB_CLOSED`)
+- 작업기가 꺼져 있으면: `YOGIYO_CART_REMOTE_WAIT_SECONDS`(30초) 안에 아무도 안 가져가거나,
+  `YOGIYO_CART_REMOTE_TIMEOUT_SECONDS`(180초) 안에 결과가 없으면 시연 모드(fake)로 마무리한다 (`mode: fake`, `error`에 사유).
+  결제 승인이 "확인 중"에서 멈추지 않게 하려는 것이다.
+- 장바구니는 PC에 뜬 크로미움 창 안에만 있다. 휴대폰 화면에는 담긴 메뉴·금액·캡처가 보인다 (요기요 앱 장바구니와 연동되지 않음).
 
 ## 관리자 대시보드 (O-17 ~ O-20, 이슈 #46)
 

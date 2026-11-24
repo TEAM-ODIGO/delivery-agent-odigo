@@ -30,6 +30,6 @@ class CartJob(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     screenshot_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
     yogiyo_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    mode: Mapped[str] = mapped_column(String(8))  # real | fake
+    mode: Mapped[str] = mapped_column(String(8))  # real | fake | remote(PC 작업기)
     created_at: Mapped[datetime] = mapped_column(KstDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(KstDateTime, nullable=True)
