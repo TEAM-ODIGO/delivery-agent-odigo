@@ -1,4 +1,4 @@
-// 결제 한도·자동 주문 설정 (예전 'Agent에게 맡길 범위'). 사용자별로 이 브라우저에 저장하고 다음 주문부터 쓴다.
+// 내 카드·주문 설정 (예전 'Agent에게 맡길 범위'). 사용자별로 이 브라우저에 저장하고 다음 주문부터 쓴다.
 import { getUserToken } from "../api/client";
 import type { Action, Delegation } from "../api/types";
 
