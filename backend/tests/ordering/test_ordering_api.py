@@ -427,3 +427,45 @@ def test_service_token_and_health(env):
     wrong = env.client.get("/ordering/order-plans/op_1", headers={"Authorization": "Bearer nope"})
     assert wrong.status_code == 401 and wrong.json()["error"]["code"] == "UNAUTHORIZED_SERVICE"
     assert env.client.get("/ordering/health").json() == {"service": "ordering", "status": "UP"}
+
+
+# ---------------------------------------------------------------- B-10 (로컬 확장, #86)
+def requote(env, plan, prices=None, fee=None, version=None, quote_id=None):
+    version = version or plan["order_version"]
+    return env.client.post(
+        f"/ordering/order-plans/{plan['order_plan_id']}/requotes",
+        json={"base_order_version": version, "quote_id": quote_id or plan["quote"]["quote_id"],
+              "source": "YOGIYO_CART", "menu_prices": prices or [], "delivery_fee_krw": fee},
+        headers=headers(key=f"REQ001:b10:{version}"),
+    )
+
+
+def test_b10_requote_with_yogiyo_prices_bumps_version_and_supersedes_target(env):
+    plan = create_plan(env).json()["order_plans"][0]
+    bind(env, plan)
+    first = target(env, plan, 1).json()["approval_target"]
+    r = requote(env, plan, prices=[{"menu_id": "M1", "unit_price_krw": 19000}], fee=4000)
+    assert r.status_code == 200
+    body = r.json()
+    view = body["view"]
+    assert view["order_version"] == 2
+    assert view["quote"]["menu_subtotal_krw"] == 19000 and view["quote"]["delivery_fee_krw"] == 4000
+    assert view["quote"]["quote_id"] != plan["quote"]["quote_id"]
+    assert body["previous_quote_id"] == plan["quote"]["quote_id"]
+    assert body["invalidated_approval_target_ids"] == [first["approval_target_id"]]
+    assert requote(env, plan, prices=[{"menu_id": "M1", "unit_price_krw": 19000}], fee=4000).json() == body  # 멱등
+
+    new = {**plan, **view}
+    assert bind(env, new).status_code == 200
+    tgt = target(env, new, 1).json()["approval_target"]
+    assert tgt["quote"]["items"][0]["unit_price_krw"] == 19000
+    assert tgt["quote"]["catalog_version"] == "YGY-20261117120000:YOGIYO_CART"
+    assert tgt["quote"]["charge_krw"] == 19000 + 4000 - tgt["quote"]["instant_discount_krw"]
+
+
+def test_b10_errors(env):
+    plan = create_plan(env).json()["order_plans"][0]
+    unknown = requote(env, plan, prices=[{"menu_id": "NOPE", "unit_price_krw": 1}])
+    assert unknown.status_code == 400
+    stale = requote(env, plan, version=2)
+    assert stale.status_code == 409 and stale.json()["error"]["code"] == "VERSION_CONFLICT"

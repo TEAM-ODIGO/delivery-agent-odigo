@@ -52,6 +52,7 @@ from app.modules.ordering.schemas import (
     CreateOrderPlanBody,
     ExecutionCheckBody,
     PaymentEventBody,
+    RequoteBody,
 )
 from app.modules.ordering.views import binding_view, iso, plan_view, split_fields, target_view
 
@@ -144,6 +145,8 @@ class OrderingService:
         return self.db.scalars(
             select(BenefitBinding).where(
                 BenefitBinding.order_plan_id == plan.order_plan_id,
+                # 재견적(B-10)으로 주문 버전이 바뀌면 혜택 번호가 다시 1부터라 버전도 같이 본다
+                BenefitBinding.order_version == plan.order_version,
                 BenefitBinding.benefit_revision == plan.current_benefit_revision,
             )
         ).first()
@@ -472,6 +475,71 @@ class OrderingService:
         result = (201, {"approval_target": target_view(target), "next_action": NextAction.REQUEST_D_APPROVAL})
         self._remember(key, "B-06", request_hash, *result)
         return self._commit_or_replay(key, "B-06", request_hash, result)
+
+    # ================================================================ B-10 (로컬 확장, 이슈 #86)
+    def requote(self, order_plan_id: str, body: RequoteBody, idempotency_key: str | None,
+                header_request_id: str | None = None) -> Result:
+        """요기요 장바구니에서 확인한 가격·배달비로 같은 주문안의 새 견적을 만든다.
+
+        메뉴·수량은 그대로 두고 단가·배달비만 바꾼다. 주문 버전이 올라가고, 이전 혜택 연결·승인 대상은
+        더 쓰지 않는다 (O가 C-01 → B-05 → B-06 → D-02를 다시 거친다).
+        """
+        plan = self._load_plan(order_plan_id, header_request_id, lock=True)
+        key = f"{plan.request_id}:b10:{body.base_order_version}"
+        self._require_key(idempotency_key, key)
+        request_hash = body_hash("B-10", order_plan_id, body.model_dump(mode="json"))
+        replay = self._replay(key, "B-10", request_hash)
+        if replay is not None:
+            return replay
+
+        old = self._check_current(plan, body.base_order_version, body.quote_id)
+        prices = {p.menu_id: p.unit_price_krw for p in body.menu_prices}
+        unknown = sorted(set(prices) - {str(i["menu_id"]) for i in old.items})
+        if unknown:
+            raise OrderingError(400, "VALIDATION_ERROR", "주문안에 없는 메뉴의 가격입니다.",
+                                fields=[{"field": "menu_prices", "message": f"없는 메뉴: {unknown}"}])
+        items, subtotal = [], 0
+        for item in old.items:
+            row = dict(item)
+            if str(row["menu_id"]) in prices:
+                row["unit_price_krw"] = prices[str(row["menu_id"])]
+            items.append(row)
+            option_total = sum(o.get("price_krw") or 0 for o in row.get("options") or [])
+            subtotal += (row["unit_price_krw"] + option_total) * row["quantity"]
+        fee = old.delivery_fee_krw if body.delivery_fee_krw is None else body.delivery_fee_krw
+
+        now = self.clock()
+        plan.order_version += 1
+        quote = Quote(
+            quote_id=new_id("QT"),
+            order_plan_id=plan.order_plan_id,
+            order_version=plan.order_version,
+            restaurant_id=old.restaurant_id,
+            # 어느 값으로 만든 견적인지 남긴다 (수집 판본:요기요 장바구니 확인)
+            catalog_version=f"{old.catalog_version.split(':')[0]}:{body.source}"[:64],
+            items=items,
+            menu_subtotal_krw=subtotal,
+            delivery_fee_krw=fee,
+            pre_financial_amount_krw=subtotal + fee,
+            local_currency_merchant=old.local_currency_merchant,
+            expires_at=now + timedelta(seconds=get_settings().quote_ttl_seconds),
+            created_at=now,
+        )
+        self.db.add(quote)
+        plan.current_quote_id = quote.quote_id
+        plan.current_benefit_revision = None
+        invalidated = self._supersede_targets(plan)
+        plan.updated_at = now
+
+        response = {
+            "view": plan_view(plan, quote, None, now),
+            "previous_quote_id": old.quote_id,
+            "invalidated_approval_target_ids": invalidated,
+            "next_action": NextAction.CALCULATE_BENEFITS,
+        }
+        result = (200, response)
+        self._remember(key, "B-10", request_hash, *result)
+        return self._commit_or_replay(key, "B-10", request_hash, result)
 
     # ================================================================ B-07
     def check_execution(self, order_plan_id: str, body: ExecutionCheckBody,

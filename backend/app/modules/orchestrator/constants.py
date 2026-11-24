@@ -27,6 +27,7 @@ class ReplyType(StrEnum):
     APPROVE = "APPROVE"
     CANCEL = "CANCEL"
     RECOMMEND_AGAIN = "RECOMMEND_AGAIN"  # 로컬 확장 (이슈 #68): 후보 화면에서 다른 가게 추천받기
+    REQUOTE_FROM_CART = "REQUOTE_FROM_CART"  # 로컬 확장 (이슈 #86): 요기요 장바구니 금액으로 재견적
 
 
 # 사용자 대기 상태 → 그 상태에서 받을 수 있는 응답 (CANCEL은 모든 대기 상태에서 가능)

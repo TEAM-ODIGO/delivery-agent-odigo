@@ -132,6 +132,8 @@ export type Prompt =
       split?: { local_currency: SplitLeg; remainder: SplitLeg };
       // 사용자가 확인하고 예산을 넘겨 진행하는 주문일 때만 온다
       over_budget?: { limit_krw: number; charge_krw: number; over_krw: number };
+      // 요기요 장바구니 금액으로 다시 계산했을 때만 온다 (이슈 #86)
+      requote?: Requote;
       checks: string[];
       unverified_conditions: string[];
       expires_at: string | null;
@@ -183,7 +185,14 @@ export type Reply =
     }
   | { type: "APPROVE"; card_tap?: CardTap } // card_tap: NFC 실물 카드 태그(로컬 확장)
   | { type: "CANCEL" }
-  | { type: "RECOMMEND_AGAIN" }; // 후보 화면 '다른 가게 추천' (로컬 확장, 이슈 #68)
+  | { type: "RECOMMEND_AGAIN" } // 후보 화면 '다른 가게 추천' (로컬 확장, 이슈 #68)
+  | { type: "REQUOTE_FROM_CART" }; // 승인 화면: 요기요 장바구니 금액으로 재견적 (로컬 확장, 이슈 #86)
+
+export interface Requote {
+  cart_job_id: string;
+  previous: { charge_krw: number; menu_subtotal_krw: number; delivery_fee_krw: number; instant_discount_krw: number };
+  changes: { kind: "MENU_PRICE" | "DELIVERY_FEE" | string; name: string | null; from_krw: number; to_krw: number }[];
+}
 
 export interface PaymentMethod {
   payment_method_id: string;

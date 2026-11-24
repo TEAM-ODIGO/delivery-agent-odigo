@@ -58,7 +58,8 @@ export function useAutoStartCart(requestId: string) {
   }, [job.data?.status, start]);
 }
 
-export default function YogiyoCart({ requestId }: { requestId: string }) {
+// requotedJobId: 이 담기 결과로 이미 견적을 다시 계산했으면 그 작업 id (이슈 #86) → '금액 반영됨'으로 보인다
+export default function YogiyoCart({ requestId, requotedJobId }: { requestId: string; requotedJobId?: string }) {
   const qc = useQueryClient();
   const key = ["yogiyo-cart", requestId];
   const job = useYogiyoCart(requestId);
@@ -72,7 +73,8 @@ export default function YogiyoCart({ requestId }: { requestId: string }) {
   const status = data?.status ?? "NONE";
   if (status === "OFF") return null; // 담기가 꺼져 있으면 카드를 보이지 않는다
   const active = ACTIVE.has(status) || start.isPending;
-  const tag = STATUS_TAG[status];
+  const applied = status === "CART_MISMATCH" && !!data?.job_id && data.job_id === requotedJobId;
+  const tag = applied ? { tone: "ok" as const, text: "금액 반영됨" } : STATUS_TAG[status];
   const startError = start.error instanceof ApiError ? start.error.message : start.error ? "요청을 처리하지 못했어요." : null;
 
   return (
@@ -110,9 +112,11 @@ export default function YogiyoCart({ requestId }: { requestId: string }) {
               value={data.delivery_fee_krw != null ? krw(data.delivery_fee_krw) : "확인 못 함"}
             />
           )}
-          {data.mismatches?.map((m) => (
-            <Banner key={m}>{m}</Banner>
-          ))}
+          {applied ? (
+            <Banner tone="pri">요기요 금액으로 견적을 다시 계산했어요. 위의 내실 금액이 요기요 기준이에요.</Banner>
+          ) : (
+            data.mismatches?.map((m) => <Banner key={m}>{m}</Banner>)
+          )}
           {data.error && <Banner tone="bad">{data.error}</Banner>}
           {data.screenshot && (
             <img
