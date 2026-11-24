@@ -98,6 +98,17 @@ button.card:disabled .small:not(.bad-text) { color: var(--faint); }
 .price { font-size: 17px; font-weight: 800; white-space: nowrap; }
 .big-price { font-size: 26px; font-weight: 800; }
 .section-title { font-size: 15px; font-weight: 700; margin: 6px 0 0; }
+/* 설정 화면 큰 묶음 제목·구분선 (이슈 #72) */
+.settings-group { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.settings-group .muted { margin: 0; }
+/* 글자 크기 단계 (설정 화면만): 카드 제목 16 > 소제목·본문 14.5 > 보조 12.5 */
+.group-title { margin: 0; font-size: 16px; font-weight: 700; color: var(--ink); }
+.group-sub { margin: 2px 0 0; font-size: 12.5px; color: var(--sub); }
+.settings-group .section-title { margin: 6px 0 0; font-size: 14.5px; font-weight: 600; }
+.settings-group .toggle-row { font-size: 14.5px; }
+.settings-group .pm-row b { font-size: 14.5px; }
+.settings-group .muted { font-size: 12.5px; }
+.settings-group .input { font-size: 15px; }
 .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
 .kv > span:first-child { color: var(--sub); }
 .kv.strong { font-weight: 700; font-size: 15px; }
@@ -317,7 +328,6 @@ table.data tr.row-bad td { background: var(--bad-soft); }
 .drawer { width: min(300px, 82vw); height: 100%; background: #fff; display: flex; flex-direction: column; box-shadow: -6px 0 24px rgba(0, 0, 0, .15); }
 .drawer-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px 14px; background: var(--pri); color: #fff; }
 .drawer-title { display: flex; align-items: center; gap: 8px; font-size: 16px; }
-.drawer-title img { width: 28px; height: 28px; border-radius: 7px; box-shadow: 0 1px 4px rgba(0, 0, 0, .18); }
 .drawer-close { border: 0; background: none; font-size: 24px; line-height: 1; color: #fff; }
 .drawer-item { border: 0; background: none; text-align: left; padding: 16px 20px; font-size: 15.5px; display: flex; justify-content: space-between; border-bottom: 1px solid #f2f2f2; }
 .drawer-item:hover { background: #fafbff; }

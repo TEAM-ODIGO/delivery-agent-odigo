@@ -5,9 +5,9 @@ import { useNavigate } from "react-router-dom";
 
 // 새 주문(처음 화면)은 상단 바의 로고·ODIGO를 누르면 간다
 const MENU = [
-  { to: "/settings", label: "결제 한도·자동 주문 설정" },
+  { to: "/settings", label: "내 카드·주문 설정" },
   { to: "/orders", label: "주문 내역" },
-  { to: "/card", label: "내 카드 혜택" },
+  // '내 카드 혜택'은 설정 화면 카드 목록(⋮)과 겹쳐 메뉴에서 뺐다 (이슈 #72). /card 페이지는 NFC 카드 링크용으로 남는다
 ];
 
 export default function TopBar() {
@@ -38,10 +38,7 @@ export default function TopBar() {
         <div className="drawer-backdrop" onClick={() => setOpen(false)}>
           <nav className="drawer" aria-label="메뉴" onClick={(e) => e.stopPropagation()}>
             <div className="drawer-head">
-              <b className="drawer-title">
-                <img src="/images/odigo-logo.png" alt="" />
-                무엇을 도와드릴까요?
-              </b>
+              <b className="drawer-title">무엇을 도와드릴까요?</b>
               <button className="drawer-close" onClick={() => setOpen(false)} aria-label="메뉴 닫기">
                 ×
               </button>
