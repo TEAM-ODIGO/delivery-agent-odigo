@@ -173,6 +173,7 @@ def list_payment_methods(user_id: str, type: str | None = None, page: int = 1, p
         item["monthly_benefit_remaining_krw"] = domain.remaining_monthly_krw(
             rules.get(m.product_id), seed.BENEFIT_USED_KRW.get(m.payment_method_id, 0))
         item["status"] = m.status
+        item["has_benefit_rule"] = rules.get(m.product_id) is not None  # 혜택 규칙이 없는 카드면 추천·결제에서 빠진다 (로컬 확장)
         results.append(item)
     start = (page - 1) * page_size
     return {"count": len(results), "results": results[start:start + page_size]}

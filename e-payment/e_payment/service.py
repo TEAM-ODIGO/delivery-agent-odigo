@@ -433,15 +433,16 @@ def list_methods(db: Session, user_id: str, type_: str | None) -> dict:
     rows = db.scalars(select(PaymentMethod).where(PaymentMethod.user_id == user_id).order_by(PaymentMethod.payment_method_id)).all()
     if not rows:
         raise AppError(404, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.")
-    results = []
-    for m in rows:
-        if type_ and m.type != type_:
-            continue
-        item = {"payment_method_id": m.payment_method_id, "product_id": m.product_id, "type": m.type, "name": m.name}
-        if m.type == "LOCAL_CURRENCY":
-            item["balance_krw"] = m.balance_krw or 0
-        else:
-            item["monthly_performance_krw"] = m.monthly_performance_krw or 0
-        item.update(status=m.status, updated_at=_iso(m.updated_at))
-        results.append(item)
+    results = [method_item(m) for m in rows if not type_ or m.type == type_]
     return {"user_id": user_id, "count": len(results), "results": results, "mock": True}
+
+
+def method_item(m: PaymentMethod) -> dict:
+    """E-11 결제수단 한 건의 모양 (카드 추가 응답도 같은 모양을 쓴다)."""
+    item = {"payment_method_id": m.payment_method_id, "product_id": m.product_id, "type": m.type, "name": m.name}
+    if m.type == "LOCAL_CURRENCY":
+        item["balance_krw"] = m.balance_krw or 0
+    else:
+        item["monthly_performance_krw"] = m.monthly_performance_krw or 0
+    item.update(status=m.status, updated_at=_iso(m.updated_at))
+    return item

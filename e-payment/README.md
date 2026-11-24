@@ -44,3 +44,8 @@ APPROVE 승인 · DECLINE 거절(FAILED, MOCK_DECLINED) · UNKNOWN 기관은 승
 E-01에 선택 필드 `local_currency_payment_method_id`, `local_currency_charge_krw`를 받을 수 있다. 있으면 `charge_krw`는 전체 금액,
 지역화폐 몫은 `local_currency_charge_krw`, 나머지는 `payment_method_id`(카드)로 본다. 원장은 몫별로 갱신하고 응답에 `payments[]`가 붙는다.
 환불은 지역화폐 몫부터 돌려준다. 자세한 규칙: `../backend/docs/SPLIT_PAYMENT.md`. 기존 DB(`e.db`)는 컬럼이 추가돼 **지우고 다시 시작**해야 한다.
+
+## 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전)
+`GET /internal/card-catalog`, `POST /internal/mock-mydata/consents`, `GET /internal/mock-mydata/cards`, `POST·DELETE /internal/payment-methods`, `GET /internal/card-registrations`.
+카드는 `e_payment_method`에 들어가므로 E-11·E-01은 그대로 쓴다. 등록 기록용 새 표 2개(`e_card_registration`, `e_mydata_consent`)만 자동으로 생겨서 **기존 `e.db`를 지우지 않아도 된다.**
+진짜 마이데이터가 아니고, 카드 번호 전체는 받지 않는다 (끝 4자리만). 자세한 규칙: `../backend/docs/MY_CARDS.md`.

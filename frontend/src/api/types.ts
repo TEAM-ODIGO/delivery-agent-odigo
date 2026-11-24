@@ -465,3 +465,50 @@ export interface OwnerDashboard {
   actions: OwnerAction[];
   demo_data: boolean;
 }
+
+// ---- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전) ----
+export interface MyCard {
+  payment_method_id: string;
+  name: string;
+  type: "CARD" | "LOCAL_CURRENCY" | string;
+  status: string;
+  product_id: string | null;
+  has_benefit_rule: boolean; // false면 목록에는 보이지만 추천·결제에는 쓰이지 않는다
+  balance_krw: number | null;
+  monthly_performance_krw: number | null;
+  monthly_benefit_remaining_krw: number | null;
+  source: "MANUAL" | "MYDATA" | null; // null: 처음부터 있던 결제수단
+  last4: string | null;
+  removable: boolean; // 직접 추가한 카드만 뺄 수 있다
+}
+
+export interface MyCardList {
+  count: number;
+  results: MyCard[];
+  can_add: boolean; // false: 모의결제 서버(E)가 연결돼 있지 않다
+}
+
+export interface CardCatalog {
+  supported: { product_id: string; name: string }[];
+}
+
+export interface MyDataConsent {
+  consent_id: string;
+  scopes: string[];
+  expires_at: string;
+}
+
+export interface MyDataCard {
+  card_id: string;
+  issuer: string;
+  name: string;
+  last4: string;
+  supported: boolean; // 혜택 규칙이 있는 카드
+  monthly_performance_krw: number;
+  already_added: boolean;
+}
+
+export type CardAddBody =
+  | { source: "MANUAL"; product_id: string }
+  | { source: "MANUAL"; name: string; issuer?: string; last4?: string }
+  | { source: "MYDATA"; consent_id: string; mydata_card_id: string };

@@ -65,7 +65,7 @@ from app.modules.orchestrator.ports import (
     PaymentResponseLost,
     RecommendationPort,
 )
-from app.modules.orchestrator.schemas import RefundCreate, RunCreate
+from app.modules.orchestrator.schemas import CardAdd, RefundCreate, RunCreate
 
 CATALOG_VERSION = "CAT-V1"
 TRANSIENT = (TimeoutError, ConnectionError, httpx.TransportError)
@@ -367,6 +367,60 @@ class OrchestratorService:
             except AppError:
                 pass  # 결과 확인만 실패: 접수된 상태(PENDING)로 돌려준다
         return {"payment_id": payment_id, **refund}
+
+    # ================================================================ 내 카드 추가 (로컬 확장, 팀 합의 전)
+    def my_cards(self, user_id: str) -> dict:
+        """내 결제수단 목록 + 카드마다 어떻게 들어왔는지(직접 추가·마이데이터)와 뺄 수 있는지.
+        결제수단은 C-02, 등록 정보는 E. E 등록 정보를 못 읽어도 목록은 그대로 보여 준다."""
+        res = self.c.list_methods(user_id)
+        registered: dict[str, dict] = {}
+        lookup = getattr(self.e, "list_card_registrations", None)
+        if lookup is not None:
+            try:
+                registered = {r["payment_method_id"]: r for r in lookup(user_id).get("results", [])}
+            except AppError:
+                registered = {}
+        results = []
+        for m in res.get("results", []):
+            reg = registered.get(m["payment_method_id"])
+            results.append({
+                "payment_method_id": m["payment_method_id"],
+                "name": m.get("name"),
+                "type": m.get("type"),
+                "status": m.get("status", "ACTIVE"),
+                "product_id": m.get("product_id"),
+                "has_benefit_rule": m.get("has_benefit_rule", True),
+                "balance_krw": m.get("balance_krw"),
+                "monthly_performance_krw": m.get("monthly_performance_krw"),
+                "monthly_benefit_remaining_krw": m.get("monthly_benefit_remaining_krw"),
+                "source": reg["source"] if reg else None,
+                "last4": reg.get("last4") if reg else None,
+                "removable": reg is not None,
+            })
+        return {"count": len(results), "results": results, "can_add": hasattr(self.e, "register_card")}
+
+    def my_card_catalog(self) -> dict:
+        return self._my_cards_port("card_catalog")()
+
+    def start_mydata(self, user_id: str) -> dict:
+        """모의 마이데이터 정보제공 동의 (진짜 마이데이터가 아니다)."""
+        return self._my_cards_port("create_mydata_consent")(user_id)
+
+    def mydata_cards(self, user_id: str, consent_id: str) -> dict:
+        return self._my_cards_port("list_mydata_cards")(user_id, consent_id)
+
+    def add_card(self, user_id: str, body: CardAdd) -> dict:
+        return self._my_cards_port("register_card")({"user_id": user_id, **body.model_dump(exclude_none=True)})
+
+    def remove_card(self, user_id: str, payment_method_id: str) -> dict:
+        return self._my_cards_port("remove_card")(user_id, payment_method_id)
+
+    def _my_cards_port(self, name: str) -> Callable[..., dict]:
+        fn = getattr(self.e, name, None)
+        if fn is None:
+            raise AppError(503, "MY_CARDS_UNAVAILABLE",
+                           "카드 추가는 모의결제 서버(E)를 연결해야 쓸 수 있어요. (.env의 E_PAYMENT_URL·E_BASE_URL)")
+        return fn
 
     def _card_port(self, name: str) -> Callable[..., dict]:
         fn = getattr(self.e, name, None)

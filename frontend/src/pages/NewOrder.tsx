@@ -8,6 +8,7 @@ import { CardImage } from "../components/CardImage";
 import { Button, Screen, Tag } from "../components/ui";
 import CardTapEntry from "../components/CardTapEntry";
 import CardFlipModal from "../components/CardFlipModal";
+import MyCardsSheet from "../components/MyCards";
 import { ACTION_LABEL, DEMO_TAGS, FAIL_TEXT, krw } from "../lib/format";
 import { useToast } from "../lib/hooks";
 
@@ -184,6 +185,10 @@ function DelegationEditor({
   const [actions, setActions] = useState<Action[]>(initial.allowed_actions);
   const [limit, setLimit] = useState(initial.max_charge_krw ? String(initial.max_charge_krw) : "");
   const [picked, setPicked] = useState<string[] | null>(initial.allowed_payment_method_ids);
+  const [managing, setManaging] = useState(false); // 내 카드 관리 시트 (로컬 확장)
+  // 카드 이미지를 상품별로 고르려고 상품 ID를 가져온다 (내 카드 추가로 새로 생긴 카드도 같은 이미지를 쓴다)
+  const myCards = useQuery({ queryKey: ["my-cards", getUserToken()], queryFn: api.myCards });
+  const productOf = (id: string) => myCards.data?.results.find((c) => c.payment_method_id === id)?.product_id ?? null;
   const all = methods.map((m) => m.payment_method_id);
   const isOn = (id: string) => picked === null || picked.includes(id);
   const toggleMethod = (id: string) => {
@@ -204,9 +209,15 @@ function DelegationEditor({
       footer={
         <Button
           disabled={noMethod}
-          onClick={() =>
-            onApply({ allowed_actions: actions, max_charge_krw: amount || null, allowed_payment_method_ids: picked })
-          }
+          onClick={() => {
+            // 내 카드에서 뺀 결제수단이 남아 있지 않게 걸러 낸다
+            const kept = picked && picked.filter((id) => all.includes(id));
+            onApply({
+              allowed_actions: actions,
+              max_charge_krw: amount || null,
+              allowed_payment_method_ids: kept && kept.length === all.length ? null : kept,
+            });
+          }}
         >
           적용
         </Button>
@@ -244,7 +255,13 @@ function DelegationEditor({
         <span>원</span>
       </div>
 
-      <div className="section-title">쓸 수 있는 결제수단</div>
+      <div className="title-row">
+        <div className="section-title">쓸 수 있는 결제수단</div>
+        <button className="link" onClick={() => setManaging(true)}>
+          내 카드 관리 ›
+        </button>
+      </div>
+      {managing && <MyCardsSheet onClose={() => setManaging(false)} />}
       {loadingMethods && <span className="muted">불러오는 중…</span>}
       {methods.map((m) => (
         <label className="pm-row" key={m.payment_method_id}>
@@ -254,7 +271,7 @@ function DelegationEditor({
             checked={isOn(m.payment_method_id)}
             onChange={() => toggleMethod(m.payment_method_id)}
           />
-          <CardImage id={m.payment_method_id} name={m.name} type={m.type} long={64} />
+          <CardImage id={m.payment_method_id} name={m.name} type={m.type} productId={productOf(m.payment_method_id)} long={64} />
           <span>
             <b>{m.name}</b>
             <span className="muted">

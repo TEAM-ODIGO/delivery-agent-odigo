@@ -303,3 +303,37 @@ def test_서울페이_이름():
     names = {m.payment_method_id: m.name for methods in ledger.MOCK_USERS.values() for m in methods}
     assert names["LOCAL001"] == names["LOCAL101"] == "서울페이(서울사랑상품권)"
     assert products.CARD_PRODUCTS["PRD-LOCAL-A"]["product_name"] == "서울페이(서울사랑상품권)"
+
+
+# ---------- 혜택 규칙이 없는 카드 (내 카드 추가, 로컬 확장) ----------
+class _LedgerWithExternalCard:
+    def get_payment_methods(self, user_id, request_id=None):
+        from app.modules.benefit.domain import PaymentMethod
+
+        return [
+            PaymentMethod("CARD001", "PRD-CARD-A", "CARD", "요기요 신한카드 체크", monthly_performance_krw=350000),
+            PaymentMethod("CARD900", "PRD-EXT-CARD", "CARD", "KB국민 노리2 체크카드 (1209)",
+                          monthly_performance_krw=85000),
+        ]
+
+
+def test_c02_혜택_규칙_유무를_알려_준다(client, svc):
+    ledger.set_ledger(_LedgerWithExternalCard())
+    got = {m["payment_method_id"]: m for m in client.get("/benefit/users/U001/payment-methods", headers=svc).json()["results"]}
+    assert got["CARD001"]["has_benefit_rule"] is True
+    assert got["CARD900"]["has_benefit_rule"] is False and got["CARD900"]["monthly_benefit_remaining_krw"] is None
+
+
+def test_c01_규칙_없는_카드는_후보에서_빠지고_사유가_남는다(client, svc):
+    ledger.set_ledger(_LedgerWithExternalCard())
+    rec = client.post("/benefit/recommendations", json=BODY, headers=svc).json()
+    assert [o["payment_method_id"] for o in rec["options"]] == ["CARD001"]
+    assert {"payment_method_id": "CARD900", "reason_codes": ["RULE_NOT_FOUND"]} in rec["excluded"]
+
+
+def test_c05_규칙_없는_카드는_계속_404(client, svc):
+    ledger.set_ledger(_LedgerWithExternalCard())
+    body = {k: BODY[k] for k in ("request_id", "user_id", "restaurant_id", "menu_subtotal_krw", "delivery_fee_krw") if k in BODY}
+    r = client.post("/benefit/calculations", json={**body, "payment_method_id": "CARD900",
+                                                    "benefit_rule_version": "BEN-V1"}, headers=svc)
+    assert r.status_code == 404 and r.json()["error"]["code"] == "RULE_NOT_FOUND"
