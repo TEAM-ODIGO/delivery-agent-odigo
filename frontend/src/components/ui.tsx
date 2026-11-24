@@ -106,3 +106,16 @@ export function Spinner({ label }: { label: string }) {
     </div>
   );
 }
+
+// 오래 걸리는 작업(요기요 장바구니 담기 등)을 기다리는 동안 화면 전체를 덮는 움직이는 오디고 로봇
+export function RobotOverlay({ label, children }: { label: string; children?: ReactNode }) {
+  return (
+    <div className="robot-overlay" role="status" aria-live="polite">
+      <div className="robot-loader">
+        <img src="/images/odigo-loading.webp" alt="" width={220} height={220} />
+        <span>{label}</span>
+        {children}
+      </div>
+    </div>
+  );
+}
