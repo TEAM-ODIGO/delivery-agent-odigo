@@ -211,7 +211,6 @@ table.data tr.sel td { background: var(--pri-soft); }
 .warn-text { color: var(--warn); }
 
 /* 내 카드 혜택 화면 (로컬 확장) */
-.card-tap { border-style: dashed; }
 .card-hero { border-radius: var(--radius); padding: 18px 18px 20px; color: #fff; display: flex; flex-direction: column; gap: 6px;
   background: linear-gradient(135deg, #1f3b8f 0%, #3b5bdb 60%, #5c7cfa 100%); box-shadow: 0 6px 18px rgba(59, 91, 219, .25); }
 .card-hero.local { background: linear-gradient(135deg, #11603a 0%, #1e8e4e 70%, #37b26c 100%); box-shadow: 0 6px 18px rgba(30, 142, 78, .22); }

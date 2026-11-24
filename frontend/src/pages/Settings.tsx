@@ -105,7 +105,7 @@ function DelegationEditor({
       <section className="settings-group">
         <div className="title-row">
           <div>
-            <h2 className="group-title">오디고가 쓸 카드</h2>
+            <h2 className="group-title">ODIGO가 쓸 카드</h2>
             <p className="group-sub">체크한 카드로만 결제해요</p>
           </div>
           <button type="button" className="link" onClick={() => setManaging(true)}>
@@ -171,11 +171,8 @@ function DelegationEditor({
       </section>
 
       <section className="settings-group">
-        <div>
-          <h2 className="group-title">오디고에게 맡길 범위</h2>
-          <p className="group-sub">켜 둔 일만 오디고가 대신 해요</p>
-        </div>
-        <div className="section-title">오디고가 대신 해도 되는 일</div>
+        {/* 제목 하나로 (이슈 #83): '맡길 범위'와 '대신 해도 되는 일'이 같은 말이라 하나만 남긴다 */}
+        <h2 className="group-title">ODIGO가 대신 해도 되는 일</h2>
         <div>
           {ALL_ACTIONS.map((a) => (
             <div className="toggle-row" key={a}>
