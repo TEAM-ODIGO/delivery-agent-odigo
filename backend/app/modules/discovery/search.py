@@ -1029,7 +1029,8 @@ def similar_reason(tier: Tier, basket: Basket, keywords: list[str]) -> str | Non
         if tier_fits(tier, Basket(lines=[(item, 1)], subtotal_krw=0, delivery_fee_krw=0)):
             pick = item.menu.name
             break
-    return f"'{joined}' 대신 비슷한 '{pick}'{_eul(pick)} 담았어요." if pick else None
+    # 어떤 메뉴인지는 카드의 메뉴 줄에 이미 있으니 문장은 짧게 통일한다 (이슈 #68)
+    return f"'{joined}' 대신 비슷한 메뉴를 담았어요." if pick else None
 
 
 def exclusion_trace(evaluations: list[Evaluation], constraints: dict, chosen_ids: set[str],
