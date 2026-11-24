@@ -57,8 +57,10 @@ _CART_TEXT = """() => (document.querySelector('.cart') || {innerText: ''}).inner
 # 요기요 앞단 보안(Akamai)이 창 없는(headless) 브라우저를 막을 때 나오는 화면. 우회하지 않는다.
 _ACCESS_DENIED = """() => /Access Denied/i.test(document.title + ' ' + document.body.innerText)"""
 BLOCKED_MESSAGE = (
-    "요기요가 접속을 막았어요 (Access Denied). 창 없는(headless) 브라우저는 막히니 "
-    "YOGIYO_CART_HEADLESS=0 (창을 띄우는 모드)으로 실행해 주세요."
+    "요기요가 접속을 막았어요 (Access Denied). "
+    "창 없는(headless) 모드라면 YOGIYO_CART_HEADLESS=0으로 실행하고, "
+    "해외·클라우드 서버라면 접속 위치 때문이니 "
+    "YOGIYO_CART_MODE=remote(한국 PC 작업기)를 써 주세요."
 )
 _NOT_SERVING = """() => /요기요\\s*서비스가\\s*제공되지/.test(document.body.innerText)"""
 _VISIBLE_MODAL_TEXT = """() => [...document.querySelectorAll('.modal')]
