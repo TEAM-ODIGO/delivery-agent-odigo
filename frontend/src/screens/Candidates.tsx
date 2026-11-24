@@ -77,7 +77,7 @@ export default function Candidates({ view, busy, send, cancel, decline, back, ag
   // 화면에 실제로 보이는 개수로 안내한다 (실시간 확인 결과에 따라 숨는 후보가 있어서)
   const nearNotice =
     mainOrderable && extraList.length > 0
-      ? `조건에 딱 맞는 가게는 ${mainList.length}곳이에요. 조건을 조금 벗어난 가게 ${extraList.length}곳도 찾아 뒀어요.`
+      ? `조건에 맞는 가게 ${mainList.length}곳, 조금 벗어난 가게 ${extraList.length}곳을 찾았어요.`
       : null;
   const [picked, setPicked] = useState<number | null>(orderable[0]?.index ?? null);
   // 어떤 버튼 때문에 기다리는지 (버튼 글자를 그에 맞게 바꾼다)

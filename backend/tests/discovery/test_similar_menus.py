@@ -89,7 +89,8 @@ def test_closed_dish_falls_back_to_similar_menus_not_jjajang(db_sessions):
     assert "마라떡볶이" in names(stores["RB"])  # 다른 종류라도 '마라' 메뉴
     assert stores["RB"]["match"]["label"] == "비슷한 메뉴"
     notice = bodies[0]["search_notice"]
-    assert "마라탕집-명동점(10:30 ~ 21:30)" in notice and "영업시간이 아니에요" in notice
+    # 가게 이름·영업시간은 쓰지 않고 영업시간이 아니라는 것만 짧게 (이슈 #68)
+    assert "영업시간이 아니라" in notice and "마라탕집" not in notice and "10:30" not in notice
     assert any("'마라탕' 대신 비슷한" in r for r in stores["RC"]["reasons"])
 
 
@@ -185,5 +186,5 @@ def test_api_returns_search_notice(client, create, monkeypatch):
         headers={**HEADERS, "X-Request-ID": "REQ-SIM-1"},
         json={"top_n": 3},
     ).json()
-    assert "영업시간이 아니에요" in found["search_notice"]
+    assert "영업시간이 아니라" in found["search_notice"]
     assert "search_notice" not in found["candidates"][0]
