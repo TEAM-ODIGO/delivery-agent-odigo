@@ -11,12 +11,16 @@ import { Banner, Button, Modal, Row, Screen, Spinner, Tag } from "../components/
 import { krw, when } from "../lib/format";
 import { useToast } from "../lib/hooks";
 
-// 카드 정보로 혜택을 불러온다 (모달·페이지 공용). 같은 카드를 다시 대면 저장된 값을 먼저 보여 주고 새로 불러온다
-export function useCardDashboard(cardTap: CardTap | null) {
+// 카드 혜택을 불러온다 (모달·페이지 공용). 같은 카드를 다시 열면 저장된 값을 먼저 보여 주고 새로 불러온다
+//  - cardTap: NFC 카드를 댔을 때 (첫 화면, /card 페이지)
+//  - paymentMethodId: 설정 화면에서 카드 옆 ⋮ 를 눌렀을 때
+export function useCardDashboard(cardTap: CardTap | null, paymentMethodId?: string) {
   return useQuery({
-    queryKey: ["card-dashboard", cardTap?.token ?? cardTap?.serial_number ?? ""],
-    queryFn: () => api.cardDashboard(cardTap!),
-    enabled: cardTap !== null,
+    queryKey: paymentMethodId
+      ? ["card-dashboard", "pm", paymentMethodId]
+      : ["card-dashboard", cardTap?.token ?? cardTap?.serial_number ?? ""],
+    queryFn: () => (paymentMethodId ? api.paymentMethodDashboard(paymentMethodId) : api.cardDashboard(cardTap!)),
+    enabled: cardTap !== null || !!paymentMethodId,
     retry: false,
     refetchOnWindowFocus: false,
   });

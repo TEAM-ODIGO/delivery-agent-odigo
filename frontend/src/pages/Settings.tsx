@@ -1,11 +1,12 @@
 // 결제 한도·자동 주문 설정 (이슈 #66): 예전 주문 화면의 'Agent에게 맡길 범위'를 ☰ 메뉴로 옮겼다.
 // 예) 자녀가 부모님 계정에 한도(3만원)와 쓸 결제수단을 정해 두면, 부모님은 한 문장으로 주문한다.
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, getUserToken } from "../api/client";
 import type { Action, Delegation, PaymentMethod } from "../api/types";
 import { CardImage } from "../components/CardImage";
+import CardFlipModal from "../components/CardFlipModal";
 import { Button, Screen } from "../components/ui";
 import { ACTION_LABEL, krw } from "../lib/format";
 import { ALL_ACTIONS, loadDelegation, saveDelegation } from "../lib/delegation";
@@ -57,6 +58,9 @@ function DelegationEditor({
     setActions((cur) => (cur.includes(a) ? cur.filter((x) => x !== a) : ALL_ACTIONS.filter((x) => x === a || cur.includes(x))));
   const amount = limit ? Number(limit.replace(/[^0-9]/g, "")) : null;
   const noMethod = picked !== null && picked.length === 0;
+  // 카드 옆 ⋮ 를 누르면 그 카드의 혜택 모달 (첫 화면 NFC 태그 때와 같은 모달)
+  const [benefitOf, setBenefitOf] = useState<string | null>(null);
+  const closeBenefit = useCallback(() => setBenefitOf(null), []);
 
   return (
     <Screen
@@ -125,10 +129,27 @@ function DelegationEditor({
               {m.monthly_benefit_remaining_krw !== null && ` · 이번 달 남은 혜택 ${krw(m.monthly_benefit_remaining_krw)}`}
             </span>
           </span>
+          <button
+            type="button"
+            className="pm-more"
+            aria-label={`${m.name} 혜택 보기`}
+            onClick={(e) => {
+              e.preventDefault(); // 줄(label)을 누른 것으로 처리돼 선택이 바뀌지 않게
+              e.stopPropagation();
+              setBenefitOf(m.payment_method_id);
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="10" cy="4" r="1.8" />
+              <circle cx="10" cy="10" r="1.8" />
+              <circle cx="10" cy="16" r="1.8" />
+            </svg>
+          </button>
         </label>
       ))}
       {noMethod && <div className="banner bad">결제수단을 하나 이상 골라 주세요.</div>}
       <p className="muted">모두 선택하면 제한 없음. 실적·잔액이 안 맞는 수단은 결제 단계에서 빠져요.</p>
+      {benefitOf && <CardFlipModal paymentMethodId={benefitOf} onClose={closeBenefit} />}
     </Screen>
   );
 }
