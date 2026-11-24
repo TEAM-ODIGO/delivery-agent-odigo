@@ -132,15 +132,15 @@ export const FAIL_SHORT: Record<string, string> = {
 };
 export const reasonText = (code: string) => BLOCK_REASON[code] ?? FAIL_SHORT[code] ?? EXCLUDE_REASON[code] ?? code;
 
-// 조치할 주문의 이유
+// 살펴볼 주문의 확인할 내용 (이슈 #94: '조치' 대신 '지켜보기 / 확인 필요')
 export function actionText(action: string, stuckMinutes?: number): string {
   switch (action) {
     case "PAYMENT_UNKNOWN":
-      return "결제 결과를 확인해야 해요";
+      return "결제 결과 기다리는 중";
     case "STUCK":
-      return `진행이 ${stuckMinutes ?? ""}분째 멈췄어요`;
+      return `${stuckMinutes ?? ""}분째 멈춤`;
     case "REPEATED_FAILURE":
-      return "같은 사용자가 반복 실패";
+      return "같은 사용자가 여러 번 멈춤";
     case "BLOCKED":
       return "진행 차단";
     case "FAILED":
@@ -149,6 +149,12 @@ export function actionText(action: string, stuckMinutes?: number): string {
       return action;
   }
 }
+
+// 지켜보기: 결제 확인 중·멈춤 (기다리면 풀릴 수 있음) / 확인 필요: 차단·실패
+export const actionLevel = (action: string): { label: string; tone: "warn" | "bad" } =>
+  action === "PAYMENT_UNKNOWN" || action === "STUCK"
+    ? { label: "지켜보기", tone: "warn" }
+    : { label: "확인 필요", tone: "bad" };
 
 // 단계 이력(O-04) 종류 → 문구
 export const EVENT_LABEL: Record<string, string> = {

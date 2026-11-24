@@ -178,11 +178,20 @@ def admin_runs(svc: Service, limit: int = 100, state: str | None = None):
 
 @router.get(
     "/admin/summary",
-    summary="O-17 오늘 운영 개요·조치할 주문 (관리자)",
+    summary="O-17 오늘 운영 개요·살펴볼 주문 (관리자)",
     dependencies=[Depends(require_admin)],
 )
 def admin_summary(svc: Service):
     return svc.admin_summary()
+
+
+@router.get(
+    "/admin/events",
+    summary="(로컬 확장) 운영 개요의 최근 주문 흐름 (관리자, 이슈 #94)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_events(svc: Service, limit: int = 30):
+    return svc.admin_events(limit)
 
 
 @router.get(

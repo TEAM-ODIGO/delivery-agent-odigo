@@ -465,6 +465,10 @@ class OrchestratorService:
         """O-17 오늘 운영 개요 + 조치할 주문."""
         return admin.summary(self.session, self.now())
 
+    def admin_events(self, limit: int = admin.EVENT_LIMIT) -> dict:
+        """(로컬 확장, 이슈 #94) 운영 개요의 최근 주문 흐름."""
+        return admin.events(self.session, self.now(), max(1, min(limit, 100)))
+
     def _admin_load(self, request_id: str) -> Run:
         run = self.session.scalars(select(Run).where(Run.request_id == request_id)).first()
         if run is None:

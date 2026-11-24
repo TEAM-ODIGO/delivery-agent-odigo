@@ -137,6 +137,8 @@ def _set_job(request_id: str, **values) -> None:
 # remote 모드 (#80): PC 작업기가 가져갈 확인 작업. job_id → 작업 (프로세스 안에만 둔다)
 _remote: dict[str, dict] = {}
 _remote_lock = threading.Lock()
+# 작업기가 마지막으로 작업을 가지러 온 시각 (운영 개요의 연결 상태, 이슈 #94)
+worker_seen: dict[str, datetime | None] = {"at": None}
 REMOTE_NOT_CLAIMED = "요기요 확인 PC(작업기)가 작업을 가져가지 않았어요"
 REMOTE_NO_RESULT = "요기요 확인 PC(작업기)가 제시간에 결과를 보내지 않았어요"
 
@@ -318,6 +320,7 @@ class LiveCheckService:
 
     def claim(self, worker: str | None = None) -> dict | None:
         """PC 작업기가 가져갈 확인 작업 하나 (먼저 쌓인 것부터). 없으면 None."""
+        worker_seen["at"] = self.now()
         self._expire_remote()
         with _remote_lock:
             queued = [j for j in _remote.values() if j["status"] == "QUEUED"]
