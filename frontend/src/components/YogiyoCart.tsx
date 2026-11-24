@@ -1,5 +1,6 @@
 // 요기요 장바구니 담기 (O-13 시작 · O-14 결과 폴링)
 // 요기요 장바구니까지만 채우고 멈춘다. 요기요의 주문하기·결제는 누르지 않는다.
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { YogiyoCartJob } from "../api/types";
@@ -25,12 +26,36 @@ export function useYogiyoCart(requestId: string) {
   });
 }
 
-// 승인을 막아야 하는 이유 (없으면 null). 담기를 안 했거나 금액만 다르면 막지 않는다.
+// 승인을 막아야 하는 이유 (없으면 null). 이슈 #64: 요기요에서 확인하기 전에는 승인하지 않는다.
+// 금액만 다른 경우(CART_MISMATCH)는 막지 않고 화면 경고만, 담기가 꺼져 있으면(OFF) 막지 않는다.
 export function cartBlockReason(job: YogiyoCartJob | undefined, starting = false): string | null {
-  if (starting || ACTIVE.has(job?.status ?? "")) return "요기요 장바구니를 담는 중이에요. 끝난 뒤 승인할 수 있어요.";
-  if (job?.status === "FAILED")
+  if (starting || !job || job.status === "NONE" || ACTIVE.has(job.status))
+    return "요기요에서 가게와 메뉴를 확인하고 있어요. 확인이 끝나면 승인할 수 있어요.";
+  if (job.status === "FAILED")
     return "요기요 장바구니 담기에 실패해서 결제할 수 없어요. 다시 담거나 주문을 취소해 주세요.";
   return null;
+}
+
+// 승인 화면에 들어오면 한 번 자동으로 담기를 시작한다 (아직 담은 적이 없을 때만)
+export function useAutoStartCart(requestId: string) {
+  const qc = useQueryClient();
+  const job = useYogiyoCart(requestId);
+  const started = useRef(false);
+  const start = useMutation({
+    mutationKey: ["yogiyo-cart-start", requestId],
+    mutationFn: () => api.startYogiyoCart(requestId),
+    onSuccess: (data: YogiyoCartJob) => qc.setQueryData(["yogiyo-cart", requestId], data),
+    // 담기가 꺼져 있다고 하면(503 CART_DISABLED) 확인 없이 진행할 수 있게 OFF로 둔다
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === "CART_DISABLED")
+        qc.setQueryData(["yogiyo-cart", requestId], { status: "OFF" });
+    },
+  });
+  useEffect(() => {
+    if (started.current || job.data?.status !== "NONE") return;
+    started.current = true;
+    start.mutate();
+  }, [job.data?.status, start]);
 }
 
 export default function YogiyoCart({ requestId }: { requestId: string }) {
@@ -45,6 +70,7 @@ export default function YogiyoCart({ requestId }: { requestId: string }) {
 
   const data = job.data;
   const status = data?.status ?? "NONE";
+  if (status === "OFF") return null; // 담기가 꺼져 있으면 카드를 보이지 않는다
   const active = ACTIVE.has(status) || start.isPending;
   const tag = STATUS_TAG[status];
   const startError = start.error instanceof ApiError ? start.error.message : start.error ? "요청을 처리하지 못했어요." : null;
@@ -59,7 +85,7 @@ export default function YogiyoCart({ requestId }: { requestId: string }) {
         같은 메뉴를 요기요 장바구니에 담아 금액을 맞춰 봐요. 요기요에서 주문·결제는 하지 않아요.
       </span>
 
-      {active && <span className="muted">요기요에서 담는 중… (5~20초)</span>}
+      {(active || status === "NONE") && <span className="muted">요기요에서 담는 중… (5~20초)</span>}
 
       {data && !active && status !== "NONE" && (
         <>
@@ -89,9 +115,11 @@ export default function YogiyoCart({ requestId }: { requestId: string }) {
 
       {startError && <Banner tone="bad">{startError}</Banner>}
 
-      <Button kind="secondary" style={{ flex: "none", width: "100%" }} disabled={active} onClick={() => start.mutate()}>
-        {active ? "담는 중…" : status === "NONE" ? "요기요 장바구니에 담기" : "다시 담기"}
-      </Button>
+      {(status === "FAILED" || status === "CART_MISMATCH" || startError) && (
+        <Button kind="secondary" style={{ flex: "none", width: "100%" }} disabled={active} onClick={() => start.mutate()}>
+          {active ? "담는 중…" : "다시 담기"}
+        </Button>
+      )}
     </div>
   );
 }

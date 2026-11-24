@@ -6,7 +6,7 @@ import { Banner, Button, Row, Screen, Tag } from "../components/ui";
 import { clock, EXCLUDE_REASON, krw, secondsLeft } from "../lib/format";
 import { useNow } from "../lib/hooks";
 
-export default function PaymentSelect({ view, busy, send, cancel }: StepProps) {
+export default function PaymentSelect({ view, busy, send, back }: StepProps) {
   const now = useNow();
   const prompt = view.prompt;
   const [picked, setPicked] = useState<string | null>(
@@ -37,8 +37,9 @@ export default function PaymentSelect({ view, busy, send, cancel }: StepProps) {
       step={{ ...view.step, label: `${view.step.label} · 혜택 큰 순` }}
       footer={
         <>
-          <Button kind="secondary" onClick={cancel} disabled={busy}>
-            취소
+          {/* 이전 (이슈 #68): 주문을 취소하고 같은 문장이 채워진 입력 화면으로 (가게를 바꾸려면 다시 추천받기) */}
+          <Button kind="secondary" onClick={back} disabled={busy}>
+            이전
           </Button>
           <Button
             disabled={!chosen || busy || expired || (splitting && !localOk)}

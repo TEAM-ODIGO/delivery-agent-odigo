@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Step } from "../api/types";
+import TopBar from "./TopBar";
 
 export function Screen({
   title,
@@ -21,6 +22,7 @@ export function Screen({
   return (
     <div className="screen">
       <header className="screen-head">
+        <TopBar />
         <h1>
           {back && (
             <button className="back" onClick={back} aria-label="뒤로">

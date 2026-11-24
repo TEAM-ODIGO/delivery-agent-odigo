@@ -21,6 +21,7 @@ import asyncio
 import json
 import re
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -48,6 +49,22 @@ _READ_MENUS = """() => [...document.querySelectorAll('[ng-click^="select_menuite
   })
   .filter(m => m.id && !m.text.includes('요기서결제시'))"""
 _PAGE_TEXT = """() => document.body ? document.body.innerText : ''"""
+# 페이지 데이터(angular scope)의 전체 메뉴: 메뉴 번호·이름·현재 가격·품절 (이슈 #58)
+# 화면 카드는 '요기서결제시 할인' 카드로만 뜨는 메뉴가 있고(배스킨라빈스 블록팩 등) 그 카드는 가격 글자가 달라서,
+# 메뉴가 있는지·가격은 이 데이터로 먼저 본다. 못 읽으면 예전처럼 화면 카드로 본다.
+_DATA_MENUS = """() => {
+  for (const e of [...document.querySelectorAll('.ng-scope')].slice(0, 400)) {
+    let s = null;
+    try { s = angular.element(e).scope(); } catch (err) {}
+    const r = s && s.restaurant;
+    if (!r || !r.open_status) continue;
+    const items = (r.menu || {}).menu || {};
+    return Object.values(items).map(x => ({
+      id: String(x.id), name: x.name || '', soldout: !!x.soldout,
+      price: (x.price || {}).final_price_with_required_options ?? (x.price || {}).final_price ?? null}));
+  }
+  return null;
+}"""
 # 페이지 데이터(angular scope)의 식당 영업 상태: 임시 휴무·휴무일·영업시간 밖·일시 정지 등
 _OPEN_STATUS = """() => {
   for (const e of [...document.querySelectorAll('.ng-scope')].slice(0, 400)) {
@@ -126,7 +143,38 @@ def parse_menu_card(text: str) -> dict:
 
 
 def _norm(text: str) -> str:
-    return re.sub(r"\s+", "", text or "")
+    """이름 비교용: 전각 괄호（）→ 반각 (NFKC), 띄어쓰기 없앰."""
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text or ""))
+
+
+def _key(text: str) -> str:
+    """이름을 느슨하게 비교: 괄호·기호까지 빼고 소문자로 ('NEW 블록팩 （뉴욕치즈케이크）' = 'new블록팩뉴욕치즈케이크')."""
+    return re.sub(r"[^0-9a-z가-힣]", "", _norm(text).lower())
+
+
+def read_data_items(data: list[dict], wanted: list[CheckItem]) -> dict[str, dict]:
+    """페이지 데이터의 메뉴로 후보 메뉴를 찾는다: 메뉴 번호 → 이름(기호·띄어쓰기 무시) 순서."""
+    by_id = {str(m["id"]): m for m in data}
+    by_key: dict[str, dict] = {}
+    for m in data:
+        by_key.setdefault(_key(m.get("name") or ""), m)
+    out = {}
+    for it in wanted:
+        m = by_id.get(str(it.menu_id))
+        new_id = None
+        if m is None and it.name:
+            m = by_key.get(_key(it.name))
+            new_id = str(m["id"]) if m else None
+        if m is None:
+            out[str(it.menu_id)] = {"found": False}
+            continue
+        price = m.get("price")
+        got = {"found": True, "price_krw": int(price) if price is not None else None,
+               "sold_out": bool(m.get("soldout")), "text": (m.get("name") or "")[:200]}
+        if new_id:
+            got["new_id"] = new_id
+        out[str(it.menu_id)] = got
+    return out
 
 
 def read_items(menus: list[dict], wanted: list[CheckItem]) -> dict[str, dict]:
@@ -286,6 +334,10 @@ async def observe_page(
             obs["open_status"] = None
     if state["menus"] > 0 and not obs["not_serving"] and not obs["redirected"]:
         obs["menus"] = await page.evaluate(_READ_MENUS)
+        try:
+            obs["data_menus"] = await page.evaluate(_DATA_MENUS) or []
+        except Exception:  # noqa: BLE001 — 못 읽으면 화면 카드로 판정한다
+            obs["data_menus"] = []
         page_text = await page.evaluate(_PAGE_TEXT)
         obs["delivery_fee_krw"] = delivery_fee(await page.evaluate(_CART_TEXT), page_text)
         obs["min_order_krw"] = _won(page_text, "최소주문금액")
@@ -295,14 +347,19 @@ async def observe_page(
 def observed_for(page_obs: dict, target: CheckTarget) -> Observed:
     """식당 화면 원본 → 이 후보 기준으로 읽은 값."""
     menus = page_obs.get("menus") or []
+    data = page_obs.get("data_menus") or []
+    if data:
+        items = read_data_items(data, target.items)
+    else:
+        items = read_items(menus, target.items) if menus else {}
     return Observed(
         url=page_obs.get("url"),
         not_serving=bool(page_obs.get("not_serving")),
         denied=bool(page_obs.get("denied")),
         redirected=bool(page_obs.get("redirected")),
         open_status=page_obs.get("open_status"),
-        menus_total=len(menus),
-        items=read_items(menus, target.items) if menus else {},
+        menus_total=max(len(menus), len(data)),
+        items=items,
         delivery_fee_krw=page_obs.get("delivery_fee_krw"),
         min_order_krw=page_obs.get("min_order_krw"),
     )

@@ -227,3 +227,40 @@ def test_judge_uses_open_status_even_without_not_serving_text():
     status, _, reason = judge(_target(), _obs(not_serving=True))
     assert reason == "지금 요기요 주문을 받지 않아요 (서비스 미제공)"  # 상태를 못 읽으면 예전 문구
     assert judge(_target(), _obs(open_status={"current": "OPENING_TIME"}))[0] == "OK"
+
+
+# ---------------------------------------------------------------- 페이지 데이터로 메뉴 찾기 (이슈 #58)
+def test_data_menus_find_items_only_shown_as_discount_cards():
+    """배스킨라빈스 블록팩처럼 '요기서결제시 할인' 카드로만 뜨는 메뉴도 페이지 데이터로 찾는다."""
+    from app.modules.livecheck.checker import CheckItem, CheckTarget, observed_for
+
+    target = CheckTarget(
+        restaurant_id="BR", items=[CheckItem(menu_id="1068493026", name="NEW 블록팩 (뉴욕치즈케이크)",
+                                             expected_price_krw=4900),
+                                   CheckItem(menu_id="OLD9", name="그린티 아이스모찌", expected_price_krw=4000)],
+        expected_delivery_fee_krw=None, expected_min_order_krw=None,
+    )
+    page = {
+        "url": "https://www.yogiyo.co.kr/mobile/#/BR/", "denied": False, "not_serving": False, "redirected": False,
+        "menus": [{"id": "1068493220", "text": "파인트 11,900원"}],  # 화면 카드에는 블록팩이 없음
+        "data_menus": [
+            {"id": "1068493026", "name": "NEW 블록팩 （뉴욕치즈케이크）", "price": 4900, "soldout": False},
+            {"id": "NEW1", "name": "그린티 아이스모찌", "price": 4500, "soldout": False},  # 번호만 바뀜
+        ],
+    }
+    obs = observed_for(page, target)
+    assert obs.items["1068493026"]["found"] and obs.items["1068493026"]["price_krw"] == 4900
+    assert obs.items["OLD9"]["new_id"] == "NEW1" and obs.items["OLD9"]["price_krw"] == 4500
+    status, changes, reason = judge(target, obs)
+    assert status == "CHANGED" and reason is None
+    assert any("4,000원 → 4,500원" in c for c in changes)
+
+
+def test_name_match_ignores_fullwidth_brackets_and_spaces():
+    from app.modules.livecheck.checker import CheckItem, read_data_items
+
+    got = read_data_items(
+        [{"id": "X", "name": "Lessly) 블록팩 （민트초콜릿칩）", "price": 4900, "soldout": True}],
+        [CheckItem(menu_id="OLD", name="Lessly) 블록팩 (민트초콜릿칩)", expected_price_krw=4900)],
+    )
+    assert got["OLD"]["found"] and got["OLD"]["sold_out"] and got["OLD"]["new_id"] == "X"

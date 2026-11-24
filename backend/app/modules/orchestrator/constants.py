@@ -26,6 +26,7 @@ class ReplyType(StrEnum):
     SELECT_PAYMENT_METHOD = "SELECT_PAYMENT_METHOD"
     APPROVE = "APPROVE"
     CANCEL = "CANCEL"
+    RECOMMEND_AGAIN = "RECOMMEND_AGAIN"  # 로컬 확장 (이슈 #68): 후보 화면에서 다른 가게 추천받기
 
 
 # 사용자 대기 상태 → 그 상태에서 받을 수 있는 응답 (CANCEL은 모든 대기 상태에서 가능)

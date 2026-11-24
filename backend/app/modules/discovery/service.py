@@ -38,6 +38,8 @@ from app.modules.discovery.extractor import (
 )
 from app.modules.discovery.models import Candidate, ConstraintsHistory, DiscoveryRequest, Exclusion
 from app.modules.discovery.schemas import Constraints, ConstraintsPatch, CreateRequestBody, LlmExtraction, ordered_tastes
+from app.modules.discovery.brands import find_brands
+from app.modules.discovery.catalog_models import Restaurant
 from app.modules.discovery.search import search
 
 MESSAGE_MAX_LENGTH = 300
@@ -216,6 +218,7 @@ def create_request(db: Session, body: CreateRequestBody) -> dict:
     extraction = llm.extract_conditions(db, body.request_id, message)
     constraints, notes, source = _merge(rule_constraints, rule_notes, extraction, message)
     constraints["delivery_address"] = body.delivery_address.model_dump()
+    constraints["brands"] = find_brands(message, list(db.scalars(select(Restaurant.name))))
     constraints = Constraints.model_validate(constraints).model_dump()
 
     missing = _missing_slots(constraints)
@@ -289,7 +292,7 @@ def _patched_value(field_name: str, patch: ConstraintsPatch):
             })
         return normalized
 
-    if field_name in ("excluded_ingredients", "menu_keywords"):
+    if field_name in ("excluded_ingredients", "menu_keywords", "brands"):
         return _clean_words(value)
 
     if field_name == "taste_preferences":
@@ -352,7 +355,8 @@ def patch_constraints(db: Session, request_id: str, patch: ConstraintsPatch) -> 
 
 # ---------------------------------------------------------------- A-05 탐색·추천
 
-def search_request(db: Session, request_id: str, top_n: int) -> dict:
+def search_request(db: Session, request_id: str, top_n: int, exclude: list[str] | None = None) -> dict:
+    """exclude: 재추천(이슈 #68)일 때 이미 보여 준 가게. 더 찾을 가게가 없으면 지금 후보를 그대로 둔다."""
     request = _load_for_update(db, request_id)
     if request.status == NEED_CLARIFICATION:
         raise AppError(409, "INVALID_STATUS", "조건 확정 전에는 탐색할 수 없습니다.", {"status": request.status})
@@ -362,7 +366,20 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
         })
 
     trace: list[dict] = []
-    bodies, suggestions = search(db, request.constraints, top_n, now=filter_now(), trace=trace)
+    bodies, suggestions = search(
+        db, request.constraints, top_n, now=filter_now(), trace=trace, exclude_restaurant_ids=set(exclude or [])
+    )
+    if exclude and not bodies:
+        # 재추천인데 더 없음: 지금 후보(선택 가능 상태)를 그대로 두고 알리기만 한다
+        db.rollback()
+        return {
+            "request_id": request_id,
+            "status": NO_CANDIDATES,
+            "constraints_version": request.constraints_version,
+            "candidates": [],
+            "relaxation_suggestions": suggestions,
+            "search_notice": None,
+        }
     # 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 그 이유 (이슈 #37, 화면 위 안내)
     notice = bodies[0].pop("search_notice", None) if bodies else None
 

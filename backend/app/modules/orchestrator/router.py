@@ -152,6 +152,11 @@ def mydata_cards(consent_id: str, svc: Service, user_id: UserId):
     return svc.mydata_cards(user_id, consent_id)
 
 
+@router.get("/payment-methods/{payment_method_id}/dashboard", summary="(로컬 확장) 내 결제수단 혜택 화면 (설정 화면 ⋮)")
+def payment_method_dashboard(payment_method_id: str, svc: Service, user_id: UserId):
+    return svc.payment_method_dashboard(user_id, payment_method_id)
+
+
 @router.post("/card-taps/dashboard", summary="(로컬 확장) NFC 카드를 대면 내 카드 혜택 화면")
 def card_dashboard(body: CardDashboardRequest, svc: Service, user_id: UserId):
     return svc.card_dashboard(user_id, body.card_tap.model_dump(exclude_none=True))
@@ -229,7 +234,8 @@ def start_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart
 @router.get("/runs/{request_id}/yogiyo-cart", summary="O-14 요기요 장바구니 담기 결과")
 def get_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
     svc.check_owner(user_id, request_id)
-    return cart.latest(request_id) or {"status": "NONE"}
+    # 담기가 꺼져 있으면(YOGIYO_CART_MODE=off) OFF: 화면이 '요기요 확인 전'이라고 승인을 막지 않게 (이슈 #64)
+    return cart.latest(request_id) or {"status": "NONE" if cart.enabled else "OFF"}
 
 
 @router.post("/runs/{request_id}/candidate-views", summary="(로컬 확장) 후보 화면에 실제로 보인 후보 기록")

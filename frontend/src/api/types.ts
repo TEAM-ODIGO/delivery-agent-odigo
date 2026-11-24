@@ -182,7 +182,8 @@ export type Reply =
       local_currency_amount_krw?: number; // 있으면 payment_method_id는 나머지를 낼 카드
     }
   | { type: "APPROVE"; card_tap?: CardTap } // card_tap: NFC 실물 카드 태그(로컬 확장)
-  | { type: "CANCEL" };
+  | { type: "CANCEL" }
+  | { type: "RECOMMEND_AGAIN" }; // 후보 화면 '다른 가게 추천' (로컬 확장, 이슈 #68)
 
 export interface PaymentMethod {
   payment_method_id: string;
@@ -234,7 +235,8 @@ export type YogiyoCartStatus =
   | "RUNNING"
   | "CART_READY"
   | "CART_MISMATCH"
-  | "FAILED";
+  | "FAILED"
+  | "OFF"; // 담기가 꺼져 있음 (YOGIYO_CART_MODE=off)
 
 export interface YogiyoCartItem {
   menu_id: number | string;

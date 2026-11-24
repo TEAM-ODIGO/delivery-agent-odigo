@@ -12,13 +12,13 @@ import {
   readCardTap,
   savePendingTap,
 } from "../lib/nfc";
-import { Banner, Button, Row, Screen, Tag } from "../components/ui";
+import { Banner, Button, Row, Screen } from "../components/ui";
 import { clock, krw, secondsLeft, unverifiedTexts } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import YogiyoCart, { cartBlockReason, useYogiyoCart } from "../components/YogiyoCart";
+import YogiyoCart, { cartBlockReason, useAutoStartCart, useYogiyoCart } from "../components/YogiyoCart";
 import { useIsMutating } from "@tanstack/react-query";
 
-export default function Approval({ view, busy, send, cancel }: StepProps) {
+export default function Approval({ view, busy, send, back }: StepProps) {
   const now = useNow();
   const prompt = view.prompt;
   const [tapping, setTapping] = useState(false);
@@ -44,6 +44,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
   const expired = left === 0;
   const unverified = unverifiedTexts(unverified_conditions);
   const cart = useYogiyoCart(view.request_id);
+  useAutoStartCart(view.request_id);
   const starting = useIsMutating({ mutationKey: ["yogiyo-cart-start", view.request_id] }) > 0;
   const cartBlock = cartBlockReason(cart.data, starting);
   // NFC 태그는 카드 결제일 때만 받는다. 지역화폐 단독 결제는 카드가 없으니 태그 없이 바로 결제하고,
@@ -96,17 +97,26 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
       step={view.step}
       footer={
         <>
+          {/* 이전 (이슈 #68): 주문을 취소하고 같은 문장이 채워진 입력 화면으로 */}
           {waiting ? (
             <Button kind="secondary" onClick={stopTap}>
               태그 취소
             </Button>
           ) : (
-            <Button kind="secondary" onClick={cancel} disabled={busy}>
-              취소
+            <Button kind="secondary" onClick={back} disabled={busy}>
+              이전
             </Button>
           )}
           <Button onClick={approve} disabled={busy || expired || !!cartBlock || waiting}>
-            {busy ? "결제 요청 중…" : waiting ? "카드를 대 주세요…" : needsTap ? "승인하고 카드 태그" : "승인하고 결제"}
+            {busy
+              ? "결제 요청 중…"
+              : waiting
+                ? "카드를 대 주세요…"
+                : cartBlock && cart.data?.status !== "FAILED"
+                  ? "요기요 확인 중…"
+                  : needsTap
+                    ? "승인하고 카드 태그"
+                    : "승인하고 결제"}
           </Button>
         </>
       }
@@ -131,11 +141,11 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
         ))}
         <Row label="배달비" value={krw(order.delivery_fee_krw)} />
         {order.instant_discount_krw > 0 && (
-          <Row label={`${order.payment_method.name} 즉시할인`} value={`−${krw(order.instant_discount_krw)}`} tone="ok" />
+          <Row label={`${order.payment_method.name} 할인`} value={`−${krw(order.instant_discount_krw)}`} tone="ok" />
         )}
         <div className="divider" />
         <div className="title-row">
-          <b>결제 금액</b>
+          <b>내실 금액</b>
           <span className="big-price">{krw(order.charge_krw)}</span>
         </div>
         {split ? (
@@ -144,17 +154,16 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
             <Row label={`카드 · ${split.remainder.name ?? split.remainder.payment_method_id}`} value={krw(split.remainder.charge_krw)} />
           </>
         ) : (
-          <span className="muted">결제수단 {order.payment_method.name}</span>
+          <span className="muted">{order.payment_method.name}(으)로 결제해요</span>
         )}
       </div>
 
       {checks.length > 0 && (
         <>
-          <div className="section-title">확인한 조건</div>
+          <div className="section-title">말씀하신 조건에 맞는지 확인했어요</div>
           {checks.map((c) => (
             <div className="check-row" key={c}>
               <span>✓ {c}</span>
-              <Tag tone="ok">D 검증</Tag>
             </div>
           ))}
         </>
@@ -162,7 +171,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
 
       {unverified.length > 0 && (
         <>
-          <div className="section-title">확인 못 한 조건</div>
+          <div className="section-title">확인하지 못한 부분</div>
           {unverified.map((u) => (
             <Banner key={u}>{u}</Banner>
           ))}
@@ -175,7 +184,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
         </Banner>
       )}
       <YogiyoCart requestId={view.request_id} />
-      {cartBlock && <Banner tone="bad">{cartBlock}</Banner>}
+      {cartBlock && <Banner tone={cart.data?.status === "FAILED" ? "bad" : "pri"}>{cartBlock}</Banner>}
       {tapping && (
         <Banner tone="pri">결제할 NFC 카드({order.payment_method.name})를 휴대폰 뒷면에 대 주세요</Banner>
       )}

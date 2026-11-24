@@ -79,8 +79,8 @@ async function call<T>(
 }
 
 export const DEMO_ADDRESS = {
-  label: "서울특별시 중구 세종대로 110 (서울시청)",
-  value: { region_code: "11140", lat: 37.5665868, lng: 126.97819753 },
+  label: "서울특별시 중구 을지로 지하42 (을지로입구역)",
+  value: { region_code: "11140", lat: 37.5660509, lng: 126.98237295 },
 };
 
 export const api = {
@@ -157,6 +157,9 @@ export const api = {
       method: "DELETE",
     }),
   // (로컬 확장) NFC 카드를 대면 내 카드 혜택 화면
+  // (로컬 확장) 설정 화면의 ⋮ 버튼 — 결제수단 ID로 같은 카드 혜택 화면
+  paymentMethodDashboard: (paymentMethodId: string) =>
+    call<CardDashboard>(`/orchestrator/payment-methods/${encodeURIComponent(paymentMethodId)}/dashboard`),
   cardDashboard: (card_tap: CardTap) =>
     call<CardDashboard>("/orchestrator/card-taps/dashboard", {
       method: "POST",

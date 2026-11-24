@@ -1,51 +1,31 @@
-// 01 주문 입력 + 01-1 맡길 범위
+// 01 주문 입력 (결제 한도·자동 주문 설정은 ☰ 메뉴 → /settings, 이슈 #66)
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError, DEMO_ADDRESS, getUserToken } from "../api/client";
-import type { Action, CardTap, Delegation, PaymentMethod } from "../api/types";
-import { CardImage } from "../components/CardImage";
+import { api, ApiError, DEMO_ADDRESS } from "../api/client";
+import type { CardTap } from "../api/types";
 import { Button, Screen, Tag } from "../components/ui";
 import CardTapEntry from "../components/CardTapEntry";
 import CardFlipModal from "../components/CardFlipModal";
-import MyCardsSheet from "../components/MyCards";
-import { ACTION_LABEL, DEMO_TAGS, FAIL_TEXT, krw } from "../lib/format";
+import { DEMO_TAGS, FAIL_TEXT, krw } from "../lib/format";
+import { loadDelegation } from "../lib/delegation";
+import { rememberMessage } from "../lib/lastMessage";
 import { useToast } from "../lib/hooks";
 
-const EXAMPLES = ["둘이서 2만원 이하로 안 매운 치킨 빨리", "혼자 1만5천원 이하 떡볶이", "셋이서 피자 3만원"];
-const ALL_ACTIONS: Action[] = ["SEARCH", "BUILD_ORDER", "REQUEST_PAYMENT"];
-const DEFAULT_DELEGATION: Delegation = {
-  allowed_actions: ALL_ACTIONS,
-  allowed_payment_method_ids: null,
-  max_charge_krw: null,
-};
-
-function loadDelegation(): Delegation {
-  try {
-    const raw = localStorage.getItem(`agent.delegation.${getUserToken()}`);
-    return raw ? { ...DEFAULT_DELEGATION, ...JSON.parse(raw) } : DEFAULT_DELEGATION;
-  } catch {
-    return DEFAULT_DELEGATION;
-  }
-}
-function saveDelegation(d: Delegation) {
-  try {
-    localStorage.setItem(`agent.delegation.${getUserToken()}`, JSON.stringify(d));
-  } catch {
-    /* 저장 못 해도 이번 주문에는 그대로 쓴다 */
-  }
-}
-
+// 예시 (이슈 #64): 수집 데이터로 점심·저녁·밤 10시 모두 조건에 딱 맞는 가게가 3곳 나오는 문장
+// (scripts/check_queries.py로 확인). 맛·메뉴 조합·브랜드·인원을 한 번씩 보여 준다
+const EXAMPLES = ["둘이서 안 매운 걸로 3만원", "둘이서 짜장면 탕수육 3만원", "혼자 베라 2만원", "넷이서 치킨 6만원"];
 export default function NewOrder() {
-  const [message, setMessage] = useState("");
-  const [delegation, setDelegation] = useState<Delegation>(loadDelegation);
-  const [editing, setEditing] = useState(false);
+  // 후보 화면에서 [이전]으로 돌아오면 방금 쓴 문장을 다시 채운다 (이슈 #68)
+  const location = useLocation();
+  const [message, setMessage] = useState(() => (location.state as { message?: string } | null)?.message ?? "");
+  // 결제 한도·자동 주문 설정은 ☰ 메뉴(/settings)에서 바꾼다 (이슈 #66). 여기서는 저장된 값을 쓰기만 한다
+  const [delegation] = useState(loadDelegation);
   const toast = useToast();
   // 시연 태그가 이 서버 구성에서 동작할 때만 '시연 시나리오 넣기'를 보여 준다 (이슈 #46)
   const demoTags = useQuery({ queryKey: ["demo-tags"], queryFn: api.demoTags, staleTime: 60_000 });
   const nav = useNavigate();
   const qc = useQueryClient();
-  const methods = useQuery({ queryKey: ["payment-methods", getUserToken()], queryFn: api.paymentMethods });
   // 결제 중이 아닐 때 댄 NFC 카드 (로컬 확장): 있으면 카드 모달을 띄운다
   const [tappedCard, setTappedCard] = useState<CardTap | null>(null);
   const [params, setParams] = useSearchParams();
@@ -64,29 +44,12 @@ export default function NewOrder() {
     mutationFn: () => api.startRun(message.trim(), delegation),
     onSuccess: (view) => {
       qc.setQueryData(["run", view.request_id], view);
+      rememberMessage(view.request_id, message.trim());
       nav(`/runs/${view.request_id}`);
     },
     onError: (e) => toast(e instanceof ApiError ? FAIL_TEXT[e.code] ?? e.message : "주문을 시작하지 못했어요."),
   });
 
-  if (editing) {
-    return (
-      <DelegationEditor
-        initial={delegation}
-        methods={methods.data?.results ?? []}
-        loadingMethods={methods.isLoading}
-        onBack={() => setEditing(false)}
-        onApply={(d) => {
-          setDelegation(d);
-          saveDelegation(d);
-          setEditing(false);
-        }}
-      />
-    );
-  }
-
-  const nameOf = (id: string) => methods.data?.results.find((m) => m.payment_method_id === id)?.name ?? id;
-  const allowedNames = delegation.allowed_payment_method_ids?.map(nameOf).join(", ");
   const len = [...message].length;
 
   return (
@@ -101,7 +64,7 @@ export default function NewOrder() {
     >
       <textarea
         className="input"
-        placeholder="예) 둘이서 2만원 이하로 안 매운 치킨 빨리"
+        placeholder="예) 둘이서 안 매운 걸로 3만원"
         value={message}
         maxLength={300}
         onChange={(e) => setMessage(e.target.value)}
@@ -125,20 +88,11 @@ export default function NewOrder() {
         <span className="muted">{DEMO_ADDRESS.label}</span>
       </div>
 
-      <div className="card">
-        <div className="title-row">
-          <b>Agent에게 맡길 범위</b>
-          <button className="link" onClick={() => setEditing(true)}>
-            변경 ›
-          </button>
-        </div>
-        <span className="muted">
-          {delegation.allowed_actions.map((a) => ACTION_LABEL[a]).join(" · ") || "맡긴 작업 없음"}
-          <br />
-          {delegation.max_charge_krw ? `최대 ${krw(delegation.max_charge_krw)}` : "금액 제한 없음"} ·{" "}
-          {allowedNames ? allowedNames : "결제수단 제한 없음"}
-        </span>
-      </div>
+      {delegation.max_charge_krw ? (
+        <button className="limit-line" onClick={() => nav("/settings")}>
+          결제 한도 {krw(delegation.max_charge_krw)} · 바꾸기 ›
+        </button>
+      ) : null}
 
       <CardTapEntry onCard={setTappedCard} />
       {tappedCard && <CardFlipModal cardTap={tappedCard} onClose={closeCard} />}
@@ -162,128 +116,6 @@ export default function NewOrder() {
           </details>
         </div>
       )}
-      <Link to="/orders" className="nav-link">
-        내 주문 보기 ›
-      </Link>
-    </Screen>
-  );
-}
-
-function DelegationEditor({
-  initial,
-  methods,
-  loadingMethods,
-  onBack,
-  onApply,
-}: {
-  initial: Delegation;
-  methods: PaymentMethod[];
-  loadingMethods: boolean;
-  onBack: () => void;
-  onApply: (d: Delegation) => void;
-}) {
-  const [actions, setActions] = useState<Action[]>(initial.allowed_actions);
-  const [limit, setLimit] = useState(initial.max_charge_krw ? String(initial.max_charge_krw) : "");
-  const [picked, setPicked] = useState<string[] | null>(initial.allowed_payment_method_ids);
-  const [managing, setManaging] = useState(false); // 내 카드 관리 시트 (로컬 확장)
-  // 카드 이미지를 상품별로 고르려고 상품 ID를 가져온다 (내 카드 추가로 새로 생긴 카드도 같은 이미지를 쓴다)
-  const myCards = useQuery({ queryKey: ["my-cards", getUserToken()], queryFn: api.myCards });
-  const productOf = (id: string) => myCards.data?.results.find((c) => c.payment_method_id === id)?.product_id ?? null;
-  const all = methods.map((m) => m.payment_method_id);
-  const isOn = (id: string) => picked === null || picked.includes(id);
-  const toggleMethod = (id: string) => {
-    const cur = picked ?? all;
-    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
-    setPicked(next.length === all.length ? null : next);
-  };
-  const toggleAction = (a: Action) =>
-    setActions((cur) => (cur.includes(a) ? cur.filter((x) => x !== a) : ALL_ACTIONS.filter((x) => x === a || cur.includes(x))));
-  const amount = limit ? Number(limit.replace(/[^0-9]/g, "")) : null;
-  const noMethod = picked !== null && picked.length === 0;
-
-  return (
-    <Screen
-      title="Agent에게 맡길 범위"
-      sub="이번 주문부터 적용돼요"
-      back={onBack}
-      footer={
-        <Button
-          disabled={noMethod}
-          onClick={() => {
-            // 내 카드에서 뺀 결제수단이 남아 있지 않게 걸러 낸다
-            const kept = picked && picked.filter((id) => all.includes(id));
-            onApply({
-              allowed_actions: actions,
-              max_charge_krw: amount || null,
-              allowed_payment_method_ids: kept && kept.length === all.length ? null : kept,
-            });
-          }}
-        >
-          적용
-        </Button>
-      }
-    >
-      <div className="section-title">맡길 작업</div>
-      <div>
-        {ALL_ACTIONS.map((a) => (
-          <div className="toggle-row" key={a}>
-            <span>{ACTION_LABEL[a]}</span>
-            <button
-              className={`switch${actions.includes(a) ? " on" : ""}`}
-              role="switch"
-              aria-checked={actions.includes(a)}
-              aria-label={ACTION_LABEL[a]}
-              onClick={() => toggleAction(a)}
-            />
-          </div>
-        ))}
-      </div>
-      {!actions.includes("REQUEST_PAYMENT") && (
-        <div className="banner warn">결제 요청을 맡기지 않으면 승인 단계에서 진행이 멈춰요.</div>
-      )}
-
-      <div className="section-title">최대 결제 금액</div>
-      <div className="input-suffix">
-        <input
-          className="input"
-          inputMode="numeric"
-          placeholder="제한 없음"
-          value={amount ? amount.toLocaleString("ko-KR") : ""}
-          onChange={(e) => setLimit(e.target.value)}
-          aria-label="최대 결제 금액"
-        />
-        <span>원</span>
-      </div>
-
-      <div className="title-row">
-        <div className="section-title">쓸 수 있는 결제수단</div>
-        <button className="link" onClick={() => setManaging(true)}>
-          내 카드 관리 ›
-        </button>
-      </div>
-      {managing && <MyCardsSheet onClose={() => setManaging(false)} />}
-      {loadingMethods && <span className="muted">불러오는 중…</span>}
-      {methods.map((m) => (
-        <label className="pm-row" key={m.payment_method_id}>
-          <input
-            className="round"
-            type="checkbox"
-            checked={isOn(m.payment_method_id)}
-            onChange={() => toggleMethod(m.payment_method_id)}
-          />
-          <CardImage id={m.payment_method_id} name={m.name} type={m.type} productId={productOf(m.payment_method_id)} long={64} />
-          <span>
-            <b>{m.name}</b>
-            <span className="muted">
-              {m.type === "LOCAL_CURRENCY" ? "지역화폐" : "카드"}
-              {m.balance_krw !== null && ` · 잔액 ${krw(m.balance_krw)}`}
-              {m.monthly_benefit_remaining_krw !== null && ` · 이번 달 남은 혜택 ${krw(m.monthly_benefit_remaining_krw)}`}
-            </span>
-          </span>
-        </label>
-      ))}
-      {noMethod && <div className="banner bad">결제수단을 하나 이상 골라 주세요.</div>}
-      <p className="muted">모두 선택하면 제한 없음. 실적·잔액이 안 맞는 수단은 결제 단계에서 빠져요.</p>
     </Screen>
   );
 }

@@ -105,7 +105,6 @@ export function Blocked({ view }: StepProps) {
         <div className="card" key={code}>
           <div className="title-row">
             <b>{BLOCK_REASON[code] ?? "진행할 수 없는 주문"}</b>
-            <span className="faint mono">{code}</span>
           </div>
           {actual !== null && limit !== null && (
             <span className="muted">
@@ -135,13 +134,14 @@ export function Failed({ view }: StepProps) {
       <h2 className="center" style={{ margin: 0, fontSize: 17 }}>
         {title}
       </h2>
-      {e && (
+      {/* 오류 코드·서비스 이름은 고객에게 보이지 않는다 (이슈 #66). 관리자 화면(/admin)의 주문 상세에서 본다 */}
+      {e && reasonTexts(e.reason_codes).length > 0 && (
         <div className="card">
-          <Row label="사유" value={<span className="mono">{e.code}</span>} />
-          {e.reason_codes && e.reason_codes.length > 0 && (
-            <Row label="상세" value={<span className="mono">{e.reason_codes.join(", ")}</span>} />
-          )}
-          {e.service && <Row label="문제 서비스" value={`${e.service} · ${e.api ?? ""}`} />}
+          {reasonTexts(e.reason_codes).map((t) => (
+            <span className="muted" key={t}>
+              · {t}
+            </span>
+          ))}
         </div>
       )}
       {e?.excluded && e.excluded.length > 0 && (
@@ -156,4 +156,14 @@ export function Failed({ view }: StepProps) {
       )}
     </Screen>
   );
+}
+
+// 사유 코드 → 고객 문장 (모르는 코드는 보이지 않는다)
+function reasonTexts(codes: string[] | undefined | null): string[] {
+  const out: string[] = [];
+  for (const c of codes ?? []) {
+    const text = BLOCK_REASON[c] ?? EXCLUDE_REASON[c];
+    if (text && !out.includes(text)) out.push(text);
+  }
+  return out;
 }

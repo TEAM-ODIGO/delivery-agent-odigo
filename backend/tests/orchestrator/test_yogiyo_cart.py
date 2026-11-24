@@ -372,3 +372,10 @@ def test_install_failure_message_is_readable(monkeypatch):
     with pytest.raises(RuntimeError, match="크로미움 자동 설치 실패.*network unreachable") as e:
         yogiyo.install_chromium()
     assert "handleError" not in str(e.value)
+
+
+def test_cart_off_mode_reports_off(env, session_factory, clock):
+    """담기가 꺼져 있으면 OFF: 화면이 '요기요 확인 전'이라며 승인 버튼을 막지 않게 한다 (이슈 #64)."""
+    client = _client(env, session_factory, clock, mode="off")
+    v = env.flow("AWAITING_APPROVAL")
+    assert client.get(_url(v), headers=USER).json() == {"status": "OFF"}

@@ -8,6 +8,7 @@ import Admin from "./pages/Admin";
 import Owner from "./pages/Owner";
 import Tap from "./pages/Tap";
 import CardDashboardPage from "./pages/CardDashboard";
+import Settings from "./pages/Settings";
 
 export default function App() {
   const [toast, setToast] = useState<string | null>(null);
@@ -34,6 +35,7 @@ export default function App() {
                 <Route path="/orders" element={<MyRuns />} />
                 <Route path="/tap" element={<Tap />} />
                 <Route path="/card" element={<CardDashboardPage />} />
+                <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </div>

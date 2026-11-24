@@ -66,7 +66,8 @@ def search_request(
 ):
     check_request_id_header(x_request_id, request_id)
     top_n = body.top_n if body is not None else 3
-    return service.search_request(db, request_id, top_n)
+    exclude = body.exclude_restaurant_ids if body is not None else []
+    return service.search_request(db, request_id, top_n, exclude)
 
 
 @router.post("/requests/{request_id}/select", dependencies=[Depends(require_service_token)],
