@@ -140,6 +140,9 @@ export const api = {
   recheckLive: (requestId: string) =>
     call<LiveCheckView>(`/orchestrator/runs/${requestId}/live-check`, { method: "POST" }),
   // (로컬 확장) NFC 카드를 대면 내 카드 혜택 화면
+  // (로컬 확장) 설정 화면의 ⋮ 버튼 — 결제수단 ID로 같은 카드 혜택 화면
+  paymentMethodDashboard: (paymentMethodId: string) =>
+    call<CardDashboard>(`/orchestrator/payment-methods/${encodeURIComponent(paymentMethodId)}/dashboard`),
   cardDashboard: (card_tap: CardTap) =>
     call<CardDashboard>("/orchestrator/card-taps/dashboard", {
       method: "POST",

@@ -37,8 +37,17 @@ const FACE_TONE: Record<string, string> = {
   "PRD-LOCAL-A": "tone-local",
 };
 
-export default function CardFlipModal({ cardTap, onClose }: { cardTap: CardTap; onClose: () => void }) {
-  const dashboard = useCardDashboard(cardTap);
+// cardTap(NFC 카드를 댔을 때) 또는 paymentMethodId(설정 화면 ⋮) 중 하나로 연다
+export default function CardFlipModal({
+  cardTap,
+  paymentMethodId,
+  onClose,
+}: {
+  cardTap?: CardTap;
+  paymentMethodId?: string;
+  onClose: () => void;
+}) {
+  const dashboard = useCardDashboard(cardTap ?? null, paymentMethodId);
   const d = dashboard.data;
   const [flipped, setFlipped] = useState(false);
 

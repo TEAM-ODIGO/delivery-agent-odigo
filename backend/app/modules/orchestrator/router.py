@@ -120,6 +120,11 @@ def list_payment_methods(svc: Service, user_id: UserId):
     return svc.list_payment_methods(user_id)
 
 
+@router.get("/payment-methods/{payment_method_id}/dashboard", summary="(로컬 확장) 내 결제수단 혜택 화면 (설정 화면 ⋮)")
+def payment_method_dashboard(payment_method_id: str, svc: Service, user_id: UserId):
+    return svc.payment_method_dashboard(user_id, payment_method_id)
+
+
 @router.post("/card-taps/dashboard", summary="(로컬 확장) NFC 카드를 대면 내 카드 혜택 화면")
 def card_dashboard(body: CardDashboardRequest, svc: Service, user_id: UserId):
     return svc.card_dashboard(user_id, body.card_tap.model_dump(exclude_none=True))
