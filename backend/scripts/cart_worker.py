@@ -1,4 +1,5 @@
-"""요기요 장바구니 PC 작업기 — 배포 서버의 담기 작업을 이 PC에서 처리한다 (YOGIYO_CART_MODE=remote).
+"""요기요 PC 작업기 — 배포 서버의 담기 작업(YOGIYO_CART_MODE=remote)과
+후보 식당 실시간 확인 작업(LIVE_CHECK_MODE=remote, #80)을 이 PC에서 처리한다.
 
 배포 서버(해외 클라우드 IP)는 요기요가 Access Denied로 막는다.
 그래서 서버는 작업을 쌓아 두기만 하고,
@@ -16,6 +17,8 @@
 - 담은 요기요 창은 다음 작업이 올 때까지 열어 둔다 (시연 때 화면에 보이게).
 - 서버가 기다리는 시간(YOGIYO_CART_REMOTE_WAIT_SECONDS, 기본 30초) 안에 가져가지 못하면
   서버가 시연 모드(fake)로 마무리한다. 그때 올린 결과는 409로 거절된다.
+- 실시간 확인 작업을 담기보다 먼저 처리한다 (후보 화면이 기다리는 작업). 서버가
+  LIVE_CHECK_REMOTE_WAIT_SECONDS(기본 20초) 안에 못 가져가면 후보는 '요기요 확인 못 함'으로 넘어간다.
 """
 
 import argparse
@@ -32,9 +35,15 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # backend/ 를 import 경로에 추가
 
 from app.modules.cart.yogiyo import BrowserKeeper, CartItem, CartOrder, CartResult  # noqa: E402
+from app.modules.livecheck.remote import (  # noqa: E402
+    check_on_browser,
+    result_to_json,
+    target_from_json,
+)
 
 log = logging.getLogger("cart_worker")
 CLAIM = "/orchestrator/cart-worker/jobs/claim"
+LIVE_CLAIM = "/orchestrator/cart-worker/live-checks/claim"
 
 
 def _order(job: dict) -> CartOrder:
@@ -100,6 +109,57 @@ def handle(client: httpx.Client, keeper: BrowserKeeper, job: dict, args) -> None
         log.info("작업 %s: 결과를 서버에 올렸어요", job_id)
 
 
+def handle_live(client: httpx.Client, keeper: BrowserKeeper, job: dict, args) -> None:
+    """후보 식당 실시간 확인 (#80): 식당 화면을 읽어 판정과 원본을 서버에 올린다."""
+    job_id = job["job_id"]
+    raw = job.get("targets") or []
+    targets = [target_from_json(t) for t in raw]
+    cached = {i: t["cached"] for i, t in enumerate(raw) if t.get("cached")}
+    log.info("확인 %s: 후보 %d곳 (최근 확인 %d곳) 시작", job_id, len(targets), len(cached))
+    body: dict = {"results": [], "error": None}
+    try:
+        results = keeper.with_browser(
+            lambda browser: check_on_browser(
+                browser,
+                targets,
+                cached=cached,
+                concurrency=int(job.get("concurrency") or 3),
+                want=int(job.get("want") or 3),
+                timeout_seconds=float(job.get("timeout_seconds") or 8),
+            ),
+            headless=False,
+            browser_channel="chrome" if args.chrome else None,
+        )
+        body["results"] = [result_to_json(int(t["index"]), r) for t, r in zip(raw, results, strict=True)]
+        log.info("확인 %s: %s", job_id, ", ".join(f"{r.restaurant_id}={r.status}" for r in results))
+    except Exception as exc:  # noqa: BLE001 — 브라우저 실행 실패도 결과로 올린다
+        log.exception("확인 중 오류")
+        body["error"] = f"PC 작업기 오류 — {type(exc).__name__}: {exc}"[:500]
+    res = client.post(f"/orchestrator/cart-worker/live-checks/{job_id}/result", json=body)
+    if res.status_code == 409:
+        log.warning("확인 %s: 서버가 이미 마무리한 작업이라 결과를 받지 않았어요", job_id)
+    else:
+        res.raise_for_status()
+
+
+def claim_live(client: httpx.Client, keeper: BrowserKeeper, name: str, args, state: dict) -> bool:
+    """실시간 확인 작업이 있으면 처리하고 True. 이 기능이 없는 서버(404)면 다음부터 묻지 않는다."""
+    if not state.get("live", True):
+        return False
+    res = client.post(LIVE_CLAIM, json={"worker": name})
+    if res.status_code == 401:  # 토큰 오류는 아래 담기 작업 요청에서 안내하고 멈춘다
+        return False
+    if res.status_code == 404:
+        log.info("서버에 실시간 확인 작업 API가 없어 담기 작업만 처리해요")
+        state["live"] = False
+        return False
+    res.raise_for_status()
+    if res.status_code == 200:
+        handle_live(client, keeper, res.json(), args)
+        return True
+    return False
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="요기요 장바구니 PC 작업기 (YOGIYO_CART_MODE=remote)")
     p.add_argument("--server", default=os.getenv("YOGIYO_WORKER_SERVER", ""), help="배포 서버 주소")
@@ -122,8 +182,13 @@ def main() -> int:
     with httpx.Client(base_url=a.server.rstrip("/"), headers=headers, timeout=30) as client:
         log.info("작업기 시작: %s (Ctrl+C로 멈춤)", a.server)
         try:
+            state: dict = {}
             while True:
                 try:
+                    if claim_live(client, keeper, a.name, a, state):  # 후보 화면이 기다리는 작업 먼저
+                        if a.once:
+                            return 0
+                        continue
                     res = client.post(CLAIM, json={"worker": a.name})
                     if res.status_code == 401:
                         log.error("토큰이 맞지 않아요 (서버의 INTERNAL_SERVICE_TOKEN 확인).")

@@ -285,7 +285,7 @@ export interface LiveResult {
 }
 
 export interface LiveCheckView {
-  mode: "fake" | "real" | "off" | string;
+  mode: "fake" | "real" | "remote" | "off" | string;
   state: "RUNNING" | "DONE" | "NONE" | "OFF";
   total: number;
   done: number;

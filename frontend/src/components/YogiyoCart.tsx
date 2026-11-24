@@ -103,7 +103,13 @@ export default function YogiyoCart({ requestId }: { requestId: string }) {
             />
           ))}
           {data.menu_subtotal_krw != null && <Row label="요기요 메뉴 합계" value={krw(data.menu_subtotal_krw)} />}
-          {data.delivery_fee_krw != null && <Row label="요기요 배달비" value={krw(data.delivery_fee_krw)} />}
+          {/* 배달비를 읽지 못하면 '확인 못 함' (이슈 #76): 견적과 다르다고 하지 않는다 */}
+          {(status === "CART_READY" || status === "CART_MISMATCH") && (
+            <Row
+              label="요기요 배달비"
+              value={data.delivery_fee_krw != null ? krw(data.delivery_fee_krw) : "확인 못 함"}
+            />
+          )}
           {data.mismatches?.map((m) => (
             <Banner key={m}>{m}</Banner>
           ))}
