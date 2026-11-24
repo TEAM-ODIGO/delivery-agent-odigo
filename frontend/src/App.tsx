@@ -8,6 +8,7 @@ import Admin from "./pages/Admin";
 import Owner from "./pages/Owner";
 import Tap from "./pages/Tap";
 import Settings from "./pages/Settings";
+import Splash from "./components/Splash";
 
 export default function App() {
   const [toast, setToast] = useState<string | null>(null);
@@ -28,6 +29,11 @@ export default function App() {
           path="*"
           element={
             <div className="app-shell">
+              {/* 첫 접속 스플래시 (이슈 #96): 첫 화면으로 들어올 때만. /tap 등 링크로 바로 여는 화면은 제외 */}
+              <Routes>
+                <Route path="/" element={<Splash />} />
+                <Route path="*" element={null} />
+              </Routes>
               <Routes>
                 <Route path="/" element={<NewOrder />} />
                 <Route path="/runs/:requestId" element={<RunPage />} />
