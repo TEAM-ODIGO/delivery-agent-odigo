@@ -40,7 +40,7 @@ export function cartBlockReason(job: YogiyoCartJob | undefined, starting = false
 export function cartWaitingText(job: YogiyoCartJob | undefined): string {
   return job?.mode === "remote" && job.status === "QUEUED"
     ? "요기요 담기 PC(작업기)가 가져가길 기다리는 중…"
-    : "요기요에서 담는 중… (5~20초)";
+    : "요기요에서 담는 중…";
 }
 
 // 승인 화면에 들어오면 한 번 자동으로 담기를 시작한다 (아직 담은 적이 없을 때만)

@@ -112,7 +112,7 @@ export function RobotOverlay({ label, children }: { label: string; children?: Re
   return (
     <div className="robot-overlay" role="status" aria-live="polite">
       <div className="robot-loader">
-        <img src="/images/odigo-loading.webp" alt="" width={160} height={160} />
+        <img src="/images/odigo-loading.webp" alt="" width={220} height={220} />
         <span>{label}</span>
         {children}
       </div>
