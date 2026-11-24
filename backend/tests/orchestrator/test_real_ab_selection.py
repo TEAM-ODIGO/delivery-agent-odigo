@@ -83,3 +83,88 @@ def test_real_a_and_b_allow_next_candidate_after_sold_out(tmp_path, monkeypatch)
         assert selected["state"] == "PAYMENT_METHOD_SELECTION"
 
     engine.dispose()
+
+
+def test_real_b_requote_from_yogiyo_cart(tmp_path, monkeypatch):
+    """진짜 A·B·D로: 요기요 장바구니 가격으로 재견적(B-10) → 새 승인 대상·승인 (이슈 #86)."""
+    import uuid
+
+    from app.modules.cart.models import CartJob
+
+    monkeypatch.setenv("LLM_ENABLED", "false")
+    engine = make_engine(f"sqlite:///{tmp_path / 'real_rq.db'}")
+    Base.metadata.drop_all(engine)
+    init_db(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    with sessions() as db:
+        seed(db)
+    benefit = FakeBenefit()
+
+    class NoApprovalRead:
+        def get_approval(self, approval_id):
+            raise AssertionError("승인 전 단계에서 B-07을 부르면 안 됩니다")
+
+    with sessions() as o_db, sessions() as d_db:
+        svc = OrchestratorService(
+            o_db,
+            discovery=DiscoveryFacade(sessions),
+            ordering=OrderingFacade(sessions, benefit, NoApprovalRead()),
+            benefit=benefit,
+            payment=None,
+            delegation=DelegationService(
+                d_db, CBenefitPort(calculate=benefit.calculate, list_methods=benefit.list_methods)
+            ),
+        )
+
+        def reply(view, **body):
+            return svc.reply(
+                "U001",
+                view["request_id"],
+                REPLY.validate_python({**body, "expected_state_version": view["state_version"]}),
+                None,
+            )
+
+        v = svc.start_run(
+            "U001",
+            RunCreate.model_validate(
+                {"message": OK_MESSAGE, "delivery_address": ADDRESS, "delegation": DELEGATION}
+            ),
+            None,
+        )
+        v = reply(v, type="SELECT_CANDIDATE", candidate_index=0)
+        method = v["prompt"]["options"][0]["payment_method_id"]
+        v = reply(v, type="SELECT_PAYMENT_METHOD", payment_method_id=method)
+        assert v["state"] == "AWAITING_APPROVAL"
+        ctx = o_db.get(Run, v["request_id"]).context
+        q, old_approval = ctx["target_quote"], ctx["approval_id"]
+        with sessions() as db:
+            db.add(
+                CartJob(
+                    job_id="CART-" + uuid.uuid4().hex[:8],
+                    request_id=v["request_id"],
+                    user_id="U001",
+                    status="CART_MISMATCH",
+                    restaurant_id=q["restaurant_id"],
+                    expected={"items": q["items"]},
+                    cart_items=[
+                        {"menu_id": i["menu_id"], "quantity": i["quantity"], "unit_price_krw": i["unit_price_krw"] + 500}
+                        for i in q["items"]
+                    ],
+                    menu_subtotal_krw=None,
+                    delivery_fee_krw=q["delivery_fee_krw"],
+                    mismatches=["메뉴 합계가 견적과 다름"],
+                    mode="fake",
+                    created_at=ctx and o_db.get(Run, v["request_id"]).updated_at,
+                )
+            )
+            db.commit()
+        v2 = reply(v, type="REQUOTE_FROM_CART")
+        assert v2["state"] == "AWAITING_APPROVAL", v2
+        ctx2 = o_db.get(Run, v["request_id"]).context
+        added = 500 * sum(i["quantity"] for i in q["items"])
+        assert ctx2["target_quote"]["menu_subtotal_krw"] == q["menu_subtotal_krw"] + added
+        assert ctx2["target_quote"]["catalog_version"].endswith(":YOGIYO_CART")
+        assert ctx2["approval_id"] != old_approval and ctx2["order_version"] == ctx["order_version"] + 1
+        assert v2["prompt"]["requote"]["previous"]["charge_krw"] == q["charge_krw"]
+
+    engine.dispose()

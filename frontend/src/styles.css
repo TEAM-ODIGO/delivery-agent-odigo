@@ -97,6 +97,11 @@ button.card:disabled .small:not(.bad-text) { color: var(--faint); }
 .title-row b { font-size: 16px; }
 .price { font-size: 17px; font-weight: 800; white-space: nowrap; }
 .big-price { font-size: 26px; font-weight: 800; }
+/* 요기요 금액으로 다시 계산한 견적 (이슈 #86): 이전 견적은 흐리게, 바뀐 항목은 한 줄로 */
+.price-old { color: var(--faint); font-size: 14px; }
+.price-old s { font-size: 16px; }
+.requote-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.requote-note .muted { font-size: 12.5px; }
 .section-title { font-size: 15px; font-weight: 700; margin: 6px 0 0; }
 /* 설정 화면 큰 묶음 제목·구분선 (이슈 #72) */
 .settings-group { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }

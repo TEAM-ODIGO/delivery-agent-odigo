@@ -42,6 +42,10 @@ class OrderingPort(Protocol):  # B
 
     def check_execution(self, order_plan_id: str, body: Body) -> Body: ...  # B-07
 
+    def requote(
+        self, order_plan_id: str, body: Body, *, idempotency_key: str
+    ) -> Body: ...  # B-10 (로컬 확장, #86)
+
     def record_payment_event(
         self, order_plan_id: str, body: Body, *, idempotency_key: str
     ) -> Body: ...  # B-08

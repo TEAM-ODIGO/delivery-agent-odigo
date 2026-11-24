@@ -89,13 +89,21 @@ class RecommendAgainReply(Strict):
     expected_state_version: Version
 
 
+class RequoteFromCartReply(Strict):
+    """승인 화면 (로컬 확장, 이슈 #86): 요기요 장바구니 금액이 견적과 다르면 그 금액으로 견적·승인을 다시 만든다."""
+
+    type: Literal["REQUOTE_FROM_CART"]
+    expected_state_version: Version
+
+
 Reply = Annotated[
     ClarificationReply
     | SelectCandidateReply
     | SelectPaymentMethodReply
     | ApproveReply
     | CancelReply
-    | RecommendAgainReply,
+    | RecommendAgainReply
+    | RequoteFromCartReply,
     Field(discriminator="type"),
 ]
 

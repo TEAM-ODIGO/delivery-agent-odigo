@@ -198,6 +198,7 @@ class OrchestratorService:
             ReplyType.APPROVE: self._on_approve,
             ReplyType.CANCEL: self._on_cancel,
             ReplyType.RECOMMEND_AGAIN: self._on_recommend_again,
+            ReplyType.REQUOTE_FROM_CART: self._on_requote_from_cart,
         }[rtype]
         try:
             handler(run, payload)
@@ -1075,6 +1076,131 @@ class OrchestratorService:
             detail={"api": "A-05", "candidates": len(cands), "recommend_again": True, "excluded": len(shown)},
         )
 
+    def _latest_cart_job(self, request_id: str):
+        from app.modules.cart.models import CartJob
+
+        # 읽기만 한다: 아직 쓰지 않은 주문 변경을 여기서 flush하면 D(다른 세션)의 쓰기와 잠금이 겹친다
+        with self.session.no_autoflush:
+            return self.session.scalars(
+                select(CartJob)
+                .where(CartJob.request_id == request_id)
+                .order_by(CartJob.created_at.desc())
+                .limit(1)
+            ).first()
+
+    def _on_requote_from_cart(self, run: Run, p: dict) -> None:
+        """승인 화면 (로컬 확장, 이슈 #86): 요기요 장바구니에서 확인한 가격·배달비로 다시 견적을 낸다.
+
+        화면 숫자만 바꾸면 결제 금액(승인 대상)과 달라지므로 B-10 재견적 → C-01 → B-05 → B-06 → D-02를
+        다시 거친다. 메뉴·수량이 다르면(담기 자체가 다름) 금액만 바꿀 수 없어 거절한다. 결제수단은 그대로.
+        """
+        ctx = run.context
+        job = self._latest_cart_job(run.request_id)
+        if job is None or job.status != "CART_MISMATCH":
+            raise AppError(
+                409, "CART_NOT_MISMATCH", "요기요 장바구니 금액이 견적과 다를 때만 다시 계산할 수 있어요."
+            )
+        if ctx.get("requote", {}).get("cart_job_id") == job.job_id:
+            raise AppError(409, "ALREADY_REQUOTED", "이미 요기요 금액으로 다시 계산했어요.")
+        q = ctx["target_quote"]
+        cart = {str(i.get("menu_id")): i for i in job.cart_items or []}
+        if {str(i["menu_id"]): i["quantity"] for i in q["items"]} != {
+            k: v.get("quantity") for k, v in cart.items()
+        }:
+            raise AppError(
+                409,
+                "CART_ITEMS_DIFFER",
+                "요기요에 담긴 메뉴·수량이 주문안과 달라 금액만 바꿀 수 없어요. 다시 담거나 주문을 취소해 주세요.",
+            )
+        prices, changes = [], []
+        for it in q["items"]:
+            new = cart[str(it["menu_id"])].get("unit_price_krw")
+            if new is not None and new != it["unit_price_krw"]:
+                prices.append({"menu_id": str(it["menu_id"]), "unit_price_krw": new})
+                changes.append(
+                    {"kind": "MENU_PRICE", "name": it.get("name"), "from_krw": it["unit_price_krw"], "to_krw": new}
+                )
+        fee = job.delivery_fee_krw
+        if fee is not None and fee != q["delivery_fee_krw"]:
+            changes.append({"kind": "DELIVERY_FEE", "name": "배달비", "from_krw": q["delivery_fee_krw"], "to_krw": fee})
+        else:
+            fee = None
+        if not changes:
+            raise AppError(409, "NOTHING_TO_REQUOTE", "요기요 금액이 견적과 같아 다시 계산할 것이 없어요.")
+
+        previous = {
+            "charge_krw": q["charge_krw"],
+            "menu_subtotal_krw": q["menu_subtotal_krw"],
+            "delivery_fee_krw": q["delivery_fee_krw"],
+            "instant_discount_krw": q.get("instant_discount_krw") or 0,
+        }
+        pm = ctx["payment_method_id"]
+        local_amount = q.get("local_currency_amount_krw")
+        rid, plan_id, ver = run.request_id, ctx["order_plan_id"], ctx["order_version"]
+        try:
+            res = self._call(
+                run,
+                "B",
+                "B-10",
+                lambda: self.b.requote(
+                    plan_id,
+                    {
+                        "base_order_version": ver,
+                        "quote_id": ctx["quote"]["quote_id"],
+                        "source": "YOGIYO_CART",
+                        "menu_prices": prices,
+                        "delivery_fee_krw": fee,
+                    },
+                    idempotency_key=f"{rid}:b10:{ver}",
+                ),
+            )
+            view = res["view"]
+            self._set_ctx(
+                run,
+                order_version=view["order_version"],
+                quote=view["quote"],
+                requote={"cart_job_id": job.job_id, "previous": previous, "changes": changes},
+            )
+            rec = self._call(
+                run,
+                "C",
+                "C-01",
+                lambda: self.c.recommend(
+                    self._c01_body(run, view["quote"]),
+                    idempotency_key=self._c01_key(run, view["quote"]),
+                ),
+            )
+            if not any(o["payment_method_id"] == pm for o in rec.get("options", [])):
+                self._block(
+                    run,
+                    ["PAYMENT_METHOD_NOT_AVAILABLE"],
+                    {"message": "요기요 금액으로 다시 계산하니 고른 결제수단을 쓸 수 없어요. 다시 주문해 주세요."},
+                    service="C",
+                )
+                return
+            self._set_ctx(
+                run,
+                recommendation={
+                    "recommendation_id": rec["recommendation_id"],
+                    "benefit_rule_version": rec["benefit_rule_version"],
+                    "expires_at": rec.get("expires_at"),
+                    "options": rec["options"],
+                    "excluded": rec.get("excluded", []),
+                },
+            )
+            self._on_select_payment_method(
+                run,
+                {"payment_method_id": pm, **({"local_currency_amount_krw": local_amount} if local_amount else {})},
+            )
+        except AppError as exc:
+            # B 재견적은 이미 끝났을 수 있다 → 예전 승인 화면에 머물지 않고 멈춘다 (결제하지 않음)
+            self._block(
+                run,
+                [exc.code],
+                {"message": "요기요 금액으로 다시 계산하지 못했어요. 주문을 취소하고 다시 주문해 주세요."},
+                service="B",
+            )
+
     def _on_cancel(self, run: Run, p: dict) -> None:
         approval_id = run.context.get("approval_id")
         if approval_id:
@@ -1556,6 +1682,10 @@ class OrchestratorService:
                 )
             if state in FINAL:
                 raise self._state_conflict(run, "이미 끝난 주문입니다.")
+            return
+        if rtype == ReplyType.REQUOTE_FROM_CART:  # 승인 화면, 결제 시작 전에만 (이슈 #86)
+            if state != RunState.AWAITING_APPROVAL or (run.context or {}).get("execution_id"):
+                raise self._state_conflict(run, "요기요 금액 반영은 결제 승인 전에만 할 수 있습니다.")
             return
         if rtype == ReplyType.RECOMMEND_AGAIN:  # 후보 화면에서만 (이슈 #68)
             if state != RunState.CANDIDATES_READY:
@@ -2079,6 +2209,8 @@ class OrchestratorService:
             "order": self._order_view(run),
             **({"split": split} if split else {}),
             **({"over_budget": over_budget} if over_budget else {}),
+            # 요기요 장바구니 금액으로 다시 계산했으면 이전 견적과 바뀐 항목 (이슈 #86)
+            **({"requote": ctx["requote"]} if ctx.get("requote") else {}),
         }
 
     @staticmethod

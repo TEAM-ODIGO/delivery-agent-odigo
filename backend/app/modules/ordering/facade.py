@@ -83,6 +83,11 @@ class OrderingFacade:
             lambda svc: svc.create_approval_target(order_plan_id, request, idempotency_key, None)
         )
 
+    # --- B-10 (로컬 확장, #86) ---------------------------------------------------------------
+    def requote(self, order_plan_id: str, body: Body, *, idempotency_key: str) -> Body:
+        request = _parse(s.RequoteBody, body)
+        return self._run(lambda svc: svc.requote(order_plan_id, request, idempotency_key, None))
+
     # --- B-07 -----------------------------------------------------------------------------
     def check_execution(self, order_plan_id: str, body: Body) -> Body:
         request = _parse(s.ExecutionCheckBody, body)
