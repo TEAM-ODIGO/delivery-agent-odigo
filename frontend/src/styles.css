@@ -322,3 +322,8 @@ table.data tr.row-bad td { background: var(--bad-soft); }
 .drawer-item { border: 0; background: none; text-align: left; padding: 16px 20px; font-size: 15.5px; display: flex; justify-content: space-between; border-bottom: 1px solid #f2f2f2; }
 .drawer-item:hover { background: #fafbff; }
 .limit-line { border: 0; background: none; padding: 0; text-align: left; color: var(--sub); font-size: 13.5px; }
+
+/* 설정 화면: 결제수단 줄 오른쪽 끝 ⋮ (카드 혜택 모달 열기) */
+.pm-more { margin-left: auto; flex: none; width: 36px; height: 36px; border: 0; border-radius: 18px; background: none; color: var(--sub); display: grid; place-items: center; }
+.pm-more svg { fill: currentColor; }
+.pm-more:hover { background: var(--soft); color: var(--ink); }

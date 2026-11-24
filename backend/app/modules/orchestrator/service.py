@@ -331,16 +331,20 @@ class OrchestratorService:
         if not found.get("matched"):
             raise AppError(404, found.get("reason_code") or "NFC_CARD_NOT_REGISTERED",
                            found.get("message") or "등록되지 않은 NFC 카드예요.")
-        payment_method_id = found["payment_method_id"]
-        summarize = getattr(self.c, "card_dashboard", None)
-        if summarize is None:
-            raise AppError(503, "CARD_DASHBOARD_UNAVAILABLE", "지금은 카드 혜택을 불러올 수 없어요.")
         try:
-            summary = summarize(user_id, payment_method_id)
+            return self.payment_method_dashboard(user_id, found["payment_method_id"])
         except AppError as exc:
             if exc.code == "PAYMENT_METHOD_NOT_FOUND":  # 다른 사람 카드: 존재 여부를 알려 주지 않는다
                 raise AppError(403, "NFC_CARD_NOT_MINE", "내 결제수단에 등록된 카드가 아니에요.") from exc
             raise
+
+    def payment_method_dashboard(self, user_id: str, payment_method_id: str) -> dict:
+        """내 결제수단 하나의 혜택 화면 (로컬 확장): C의 혜택 요약 + E의 최근 결제 3건. 읽기 전용.
+        NFC 태그(card_dashboard)와 설정 화면의 ⋮ 버튼이 같이 쓴다. 내 결제수단이 아니면 404."""
+        summarize = getattr(self.c, "card_dashboard", None)
+        if summarize is None:
+            raise AppError(503, "CARD_DASHBOARD_UNAVAILABLE", "지금은 카드 혜택을 불러올 수 없어요.")
+        summary = summarize(user_id, payment_method_id)
         payments = self._card_port("list_card_payments")(user_id, payment_method_id, 3)
         recent = [self._recent_payment(user_id, p) for p in payments.get("items", [])]
         return {**summary, "recent_payments": recent}
