@@ -325,3 +325,28 @@ def test_health(client):
     response = client.get("/discovery/health")
     assert response.status_code == 200
     assert response.json() == {"service": "discovery", "status": "UP", "llm": "DISABLED"}
+
+
+def test_search_excludes_shown_restaurants(client, create):
+    """재추천 (이슈 #68): 이미 보여 준 가게를 빼고 찾는다. 더 없으면 지금 후보를 그대로 둔다."""
+    create("REQ001", "둘이서 3만원 이하로 치킨 시켜줘")
+    first = client.post("/discovery/requests/REQ001/search", headers=h("REQ001"), json={"top_n": 1}).json()
+    shown = [first["candidates"][0]["restaurant"]["restaurant_id"]]
+
+    while True:
+        found = client.post("/discovery/requests/REQ001/search", headers=h("REQ001"),
+                            json={"top_n": 1, "exclude_restaurant_ids": shown})
+        assert found.status_code == 200
+        body = found.json()
+        if not body["candidates"]:
+            break
+        rid = body["candidates"][0]["restaurant"]["restaurant_id"]
+        assert rid not in shown
+        shown.append(rid)
+        assert len(shown) < 10
+    assert len(shown) >= 2
+    assert body["status"] == "NO_CANDIDATES"
+
+    # 더 없을 때는 마지막 후보가 그대로 살아 있어 고를 수 있다
+    detail = client.get("/discovery/requests/REQ001", headers=h("REQ001")).json()
+    assert [c["restaurant"]["restaurant_id"] for c in detail["candidates"]] == [shown[-1]]

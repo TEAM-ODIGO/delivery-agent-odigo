@@ -42,7 +42,9 @@ class DiscoveryFacade:
 
     def search(self, request_id: str, body: Body) -> Body:  # A-05
         with self._sessions() as db:
-            return service.search_request(db, request_id, int((body or {}).get("top_n", 3)))
+            return service.search_request(
+                db, request_id, int((body or {}).get("top_n", 3)), (body or {}).get("exclude_restaurant_ids") or []
+            )
 
     def select(self, request_id: str, body: Body) -> Body:  # A-06
         with self._sessions() as db:

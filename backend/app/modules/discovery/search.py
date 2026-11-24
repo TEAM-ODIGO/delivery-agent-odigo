@@ -1068,17 +1068,19 @@ def exclusion_trace(evaluations: list[Evaluation], constraints: dict, chosen_ids
 
 def search(
     db: Session, constraints: dict, top_n: int, now: datetime | None = None,
-    trace: list[dict] | None = None,
+    trace: list[dict] | None = None, exclude_restaurant_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """브랜드를 말했으면(constraints.brands) 그 브랜드 가게에서 먼저 찾고, 없으면 전체에서 찾아 그렇다고 알린다."""
     wanted = constraints.get("brands") or []
     if wanted:
-        bodies, suggestions = _search(db, constraints, top_n, now, trace=None, only_brands=wanted)
+        bodies, suggestions = _search(
+            db, constraints, top_n, now, trace=None, only_brands=wanted, exclude=exclude_restaurant_ids
+        )
         if bodies:
             if trace is not None:  # 제외 기록은 브랜드 가게만이 아니라 전체 기준으로 남긴다
-                _search(db, constraints, top_n, now, trace=trace)
+                _search(db, constraints, top_n, now, trace=trace, exclude=exclude_restaurant_ids)
             return bodies, suggestions
-    bodies, suggestions = _search(db, constraints, top_n, now, trace=trace)
+    bodies, suggestions = _search(db, constraints, top_n, now, trace=trace, exclude=exclude_restaurant_ids)
     if wanted and bodies:
         names = ", ".join(f"'{b}'" for b in wanted)
         bodies[0]["search_notice"] = f"{names} 매장은 지금 조건에 맞게 주문할 수 없어 다른 가게를 골랐어요."
@@ -1088,6 +1090,7 @@ def search(
 def _search(
     db: Session, constraints: dict, top_n: int, now: datetime | None = None,
     trace: list[dict] | None = None, only_brands: list[str] | None = None,
+    exclude: set[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """후보 JSON 목록과 완화 제안 목록을 돌려준다.
 
@@ -1099,6 +1102,8 @@ def _search(
     restaurants = list(db.scalars(select(Restaurant)))
     if only_brands:
         restaurants = [r for r in restaurants if brand_of(r.name) in only_brands]
+    if exclude:  # 재추천 (이슈 #68): 이미 보여 준 가게는 빼고
+        restaurants = [r for r in restaurants if r.restaurant_id not in exclude]
     menus_by_restaurant: dict[str, list[Menu]] = {}
     for menu in db.scalars(select(Menu).where(Menu.menu_type.in_(ORDERABLE_TYPES + SIDE_TYPES))):
         menus_by_restaurant.setdefault(menu.restaurant_id, []).append(menu)

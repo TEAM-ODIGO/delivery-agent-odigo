@@ -197,6 +197,7 @@ class OrchestratorService:
             ReplyType.SELECT_PAYMENT_METHOD: self._on_select_payment_method,
             ReplyType.APPROVE: self._on_approve,
             ReplyType.CANCEL: self._on_cancel,
+            ReplyType.RECOMMEND_AGAIN: self._on_recommend_again,
         }[rtype]
         try:
             handler(run, payload)
@@ -966,6 +967,49 @@ class OrchestratorService:
             message = res.get("message") or "결제할 수 없는 카드예요. 다시 태그해 주세요."
             raise AppError(422, code, message, {"payment_method_id": payment_method_id})
 
+    def _on_recommend_again(self, run: Run, p: dict) -> None:
+        """후보 화면 '다시 추천' (로컬 확장, 이슈 #68).
+
+        지금까지 추천한 가게를 모두 빼고 A-05로 다시 찾는다. 새 후보로 같은 후보 화면을 다시 보여 주고
+        요기요 실시간 확인도 새 후보로 다시 한다. 더 찾을 가게가 없으면 지금 후보를 그대로 두고 409로 알린다.
+        """
+        ctx = run.context or {}
+        shown = list(dict.fromkeys(
+            [*ctx.get("recommended_restaurant_ids", []),
+             *[c["restaurant"]["restaurant_id"] for c in ctx.get("candidates", [])]]
+        ))
+        top_n = self.live.cfg.top_n if self.live else 3
+        rid = run.request_id
+        found = self._call(
+            run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n, "exclude_restaurant_ids": shown})
+        )
+        if not found.get("candidates"):
+            raise AppError(
+                409,
+                "NO_MORE_CANDIDATES",
+                "더 추천할 가게가 없어요. 지금 후보 중에서 고르거나 조건을 바꿔 다시 주문해 주세요.",
+                {"recommended": len(shown)},
+            )
+        cands = [{**c, "index": i} for i, c in enumerate(found["candidates"])]
+        cands = self._mark_min_order(run, cands, ctx.get("constraints") or {})
+        self._set_ctx(
+            run,
+            candidates=cands,
+            tried_candidate_ids=[],
+            search_notice=found.get("search_notice"),
+            recommended_restaurant_ids=shown,
+            recommend_round=int(ctx.get("recommend_round", 1)) + 1,
+        )
+        if self.live:
+            self._start_live_check(run)
+        self._to(
+            run,
+            RunState.CANDIDATES_READY,
+            prompt=self._candidate_prompt(run),
+            service="A",
+            detail={"api": "A-05", "candidates": len(cands), "recommend_again": True, "excluded": len(shown)},
+        )
+
     def _on_cancel(self, run: Run, p: dict) -> None:
         approval_id = run.context.get("approval_id")
         if approval_id:
@@ -1424,6 +1468,10 @@ class OrchestratorService:
                 )
             if state in FINAL:
                 raise self._state_conflict(run, "이미 끝난 주문입니다.")
+            return
+        if rtype == ReplyType.RECOMMEND_AGAIN:  # 후보 화면에서만 (이슈 #68)
+            if state != RunState.CANDIDATES_READY:
+                raise self._state_conflict(run, "다른 가게 추천은 후보 화면에서만 받을 수 있습니다.")
             return
         if WAITING.get(state) != rtype:
             raise self._state_conflict(run, f"지금은 {rtype} 응답을 받을 수 없습니다.")

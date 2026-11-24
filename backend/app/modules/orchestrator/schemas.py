@@ -82,12 +82,20 @@ class CancelReply(Strict):
     expected_state_version: Version
 
 
+class RecommendAgainReply(Strict):
+    """후보 화면에서 '다시 추천' (로컬 확장, 이슈 #68): 지금까지 보여 준 가게를 빼고 다시 찾는다."""
+
+    type: Literal["RECOMMEND_AGAIN"]
+    expected_state_version: Version
+
+
 Reply = Annotated[
     ClarificationReply
     | SelectCandidateReply
     | SelectPaymentMethodReply
     | ApproveReply
-    | CancelReply,
+    | CancelReply
+    | RecommendAgainReply,
     Field(discriminator="type"),
 ]
 

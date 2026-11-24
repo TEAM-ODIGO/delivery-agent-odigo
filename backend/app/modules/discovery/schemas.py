@@ -94,6 +94,8 @@ class SearchBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     top_n: int = Field(default=3, ge=1, le=10)
+    # A 확장 (이슈 #68, 재추천): 이미 보여 준 가게는 빼고 다음 순위를 찾는다
+    exclude_restaurant_ids: list[str] = Field(default_factory=list, max_length=200)
 
 
 # ---------- A-06 ----------
