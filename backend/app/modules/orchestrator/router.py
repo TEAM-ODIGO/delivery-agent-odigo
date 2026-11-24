@@ -21,6 +21,7 @@ from app.core.errors import AppError
 from app.modules.cart.service import CartService, release_browser
 from app.modules.orchestrator.schemas import (
     CandidateViews,
+    CardAdd,
     CardDashboardRequest,
     RefundCreate,
     Reply,
@@ -118,6 +119,37 @@ def list_my_runs(svc: Service, user_id: UserId, limit: int = 20):
 @router.get("/payment-methods", summary="O-10 맡길 결제수단 목록")
 def list_payment_methods(svc: Service, user_id: UserId):
     return svc.list_payment_methods(user_id)
+
+
+# ---------------- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전) ----------------
+@router.get("/my-cards", summary="(로컬 확장) 내 카드 목록 — 어떻게 추가됐는지·뺄 수 있는지 포함")
+def my_cards(svc: Service, user_id: UserId):
+    return svc.my_cards(user_id)
+
+
+@router.get("/my-cards/catalog", summary="(로컬 확장) 혜택 규칙이 있는 카드 목록")
+def my_card_catalog(svc: Service, user_id: UserId):
+    return svc.my_card_catalog()
+
+
+@router.post("/my-cards", status_code=201, summary="(로컬 확장) 내 카드 추가")
+def add_my_card(body: CardAdd, svc: Service, user_id: UserId):
+    return svc.add_card(user_id, body)
+
+
+@router.delete("/my-cards/{payment_method_id}", summary="(로컬 확장) 직접 추가한 카드 빼기")
+def remove_my_card(payment_method_id: str, svc: Service, user_id: UserId):
+    return svc.remove_card(user_id, payment_method_id)
+
+
+@router.post("/mydata/consents", status_code=201, summary="(로컬 확장) 모의 마이데이터 동의")
+def mydata_consent(svc: Service, user_id: UserId):
+    return svc.start_mydata(user_id)
+
+
+@router.get("/mydata/cards", summary="(로컬 확장) 모의 마이데이터 카드 목록")
+def mydata_cards(consent_id: str, svc: Service, user_id: UserId):
+    return svc.mydata_cards(user_id, consent_id)
 
 
 @router.get("/payment-methods/{payment_method_id}/dashboard", summary="(로컬 확장) 내 결제수단 혜택 화면 (설정 화면 ⋮)")

@@ -1,5 +1,5 @@
 // 화면은 O만 부른다 (/orchestrator/...). 개발 서버가 백엔드로 넘겨 준다(vite.config.ts).
-import type { AdminRunDetail, AdminSummary, AuditLog, CardDashboard, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView, OwnerDashboard, OwnerRestaurantRow } from "./types";
+import type { AdminRunDetail, AdminSummary, AuditLog, CardAddBody, CardCatalog, CardDashboard, MyCardList, MyDataCard, MyDataConsent, CardTap, Delegation, PaymentMethod, RefundResult, Reply, RunEvent, RunRow, RunView, YogiyoCartJob, LiveCheckView, OwnerDashboard, OwnerRestaurantRow } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -139,6 +139,23 @@ export const api = {
   // O-16 후보 요기요 실시간 다시 확인
   recheckLive: (requestId: string) =>
     call<LiveCheckView>(`/orchestrator/runs/${requestId}/live-check`, { method: "POST" }),
+  // (로컬 확장) 내 카드 추가 · 모의 마이데이터
+  myCards: () => call<MyCardList>("/orchestrator/my-cards"),
+  cardCatalog: () => call<CardCatalog>("/orchestrator/my-cards/catalog"),
+  mydataConsent: () => call<MyDataConsent>("/orchestrator/mydata/consents", { method: "POST" }),
+  mydataCards: (consentId: string) =>
+    call<{ count: number; results: MyDataCard[] }>(
+      `/orchestrator/mydata/cards?consent_id=${encodeURIComponent(consentId)}`,
+    ),
+  addCard: (body: CardAddBody) =>
+    call<{ payment_method: { payment_method_id: string; name: string } }>("/orchestrator/my-cards", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeCard: (paymentMethodId: string) =>
+    call<{ removed: boolean }>(`/orchestrator/my-cards/${encodeURIComponent(paymentMethodId)}`, {
+      method: "DELETE",
+    }),
   // (로컬 확장) NFC 카드를 대면 내 카드 혜택 화면
   // (로컬 확장) 설정 화면의 ⋮ 버튼 — 결제수단 ID로 같은 카드 혜택 화면
   paymentMethodDashboard: (paymentMethodId: string) =>

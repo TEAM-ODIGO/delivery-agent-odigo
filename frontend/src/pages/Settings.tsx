@@ -7,6 +7,7 @@ import { api, getUserToken } from "../api/client";
 import type { Action, Delegation, PaymentMethod } from "../api/types";
 import { CardImage } from "../components/CardImage";
 import CardFlipModal from "../components/CardFlipModal";
+import MyCardsSheet from "../components/MyCards";
 import { Button, Screen } from "../components/ui";
 import { ACTION_LABEL, krw } from "../lib/format";
 import { ALL_ACTIONS, loadDelegation, saveDelegation } from "../lib/delegation";
@@ -55,6 +56,11 @@ function DelegationEditor({
     initial.allowed_payment_method_ids,
   );
   const all = methods.map((m) => m.payment_method_id);
+  // 내 카드 관리 시트 (로컬 확장). 카드 이미지를 상품별로 고르려고 상품 ID도 가져온다
+  const [managing, setManaging] = useState(false);
+  const myCards = useQuery({ queryKey: ["my-cards", getUserToken()], queryFn: api.myCards });
+  const productOf = (id: string) =>
+    myCards.data?.results.find((c) => c.payment_method_id === id)?.product_id ?? null;
   const isOn = (id: string) => picked === null || picked.includes(id);
   const toggleMethod = (id: string) => {
     const cur = picked ?? all;
@@ -81,13 +87,15 @@ function DelegationEditor({
       footer={
         <Button
           disabled={noMethod}
-          onClick={() =>
+          onClick={() => {
+            // 내 카드에서 뺀 결제수단이 남아 있지 않게 걸러 낸다
+            const kept = picked && picked.filter((id) => all.includes(id));
             onApply({
               allowed_actions: actions,
               max_charge_krw: amount || null,
-              allowed_payment_method_ids: picked,
-            })
-          }
+              allowed_payment_method_ids: kept && kept.length === all.length ? null : kept,
+            });
+          }}
         >
           적용
         </Button>
@@ -95,10 +103,16 @@ function DelegationEditor({
     >
       {/* 메뉴 이름 "내 카드·주문 설정" 순서대로 두 묶음 (이슈 #72). 저장은 아래 '적용' 하나로 함께 */}
       <section className="settings-group">
-        <div>
-          <h2 className="group-title">오디고가 쓸 카드</h2>
-          <p className="group-sub">체크한 카드로만 결제해요</p>
+        <div className="title-row">
+          <div>
+            <h2 className="group-title">오디고가 쓸 카드</h2>
+            <p className="group-sub">체크한 카드로만 결제해요</p>
+          </div>
+          <button type="button" className="link" onClick={() => setManaging(true)}>
+            내 카드 관리 ›
+          </button>
         </div>
+        {managing && <MyCardsSheet onClose={() => setManaging(false)} />}
         {loadingMethods && <span className="muted">불러오는 중…</span>}
         {methods.map((m) => (
           <label className="pm-row" key={m.payment_method_id}>
@@ -112,6 +126,7 @@ function DelegationEditor({
               id={m.payment_method_id}
               name={m.name}
               type={m.type}
+              productId={productOf(m.payment_method_id)}
               long={64}
             />
             <span>

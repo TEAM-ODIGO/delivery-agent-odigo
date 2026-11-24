@@ -80,3 +80,33 @@ class Reconciliation(Base):
     transaction_ids: Mapped[list] = mapped_column(JsonType)
     status: Mapped[str] = mapped_column(String(20))  # QUEUED / DONE
     created_at: Mapped[datetime] = mapped_column(KstDateTime())
+
+
+class MyDataConsent(Base):
+    """모의 마이데이터 정보제공 동의 (로컬 확장, 팀 합의 전). 진짜 마이데이터 연동이 아니다."""
+
+    __tablename__ = "e_mydata_consent"
+    consent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    scopes: Mapped[str] = mapped_column(String(200))  # 쉼표로 이은 동의 범위
+    status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    created_at: Mapped[datetime] = mapped_column(KstDateTime())
+    expires_at: Mapped[datetime] = mapped_column(KstDateTime())
+
+
+class CardRegistration(Base):
+    """사용자가 직접 추가한(직접 입력·모의 마이데이터) 카드의 등록 기록 (로컬 확장, 팀 합의 전).
+    결제수단 원장(e_payment_method)은 그대로 두고, 어떻게 추가됐는지만 따로 적어 둔다.
+    카드 번호는 받지도 저장하지도 않는다 (끝 4자리만)."""
+
+    __tablename__ = "e_card_registration"
+    payment_method_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(20))  # MANUAL / MYDATA
+    external_ref: Mapped[str] = mapped_column(String(160))  # 같은 카드를 두 번 넣지 못하게 하는 키
+    issuer: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    consent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(KstDateTime())
+
+    __table_args__ = (UniqueConstraint("user_id", "external_ref", name="uq_card_registration_user_ref"),)

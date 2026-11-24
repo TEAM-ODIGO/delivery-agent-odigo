@@ -331,6 +331,7 @@ export interface CardDashboard {
   name: string;
   status: string;
   benefit_rule_version: string;
+  has_benefit_rule: boolean; // false면 혜택 정보만 보여 주는 카드 (추천·결제에는 쓰이지 않는다)
   product: {
     product_name: string | null;
     card_kind: string | null;
@@ -467,3 +468,52 @@ export interface OwnerDashboard {
   actions: OwnerAction[];
   demo_data: boolean;
 }
+
+// ---- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전) ----
+export interface MyCard {
+  payment_method_id: string;
+  name: string;
+  type: "CARD" | "LOCAL_CURRENCY" | string;
+  status: string;
+  product_id: string | null;
+  has_benefit_rule: boolean; // false면 목록에는 보이지만 추천·결제에는 쓰이지 않는다
+  balance_krw: number | null;
+  monthly_performance_krw: number | null;
+  monthly_benefit_remaining_krw: number | null;
+  source: "MANUAL" | "MYDATA" | null; // null: 처음부터 있던 결제수단
+  last4: string | null;
+  removable: boolean; // 직접 추가한 카드만 뺄 수 있다
+}
+
+export interface MyCardList {
+  count: number;
+  results: MyCard[];
+  can_add: boolean; // false: 모의결제 서버(E)가 연결돼 있지 않다
+}
+
+export interface CardCatalog {
+  // 혜택 정보를 아는 카드. has_benefit_rule=false(적립형 등)면 정보만 보여 주고 추천·결제에는 쓰지 않는다
+  products: { product_id: string; name: string; has_benefit_rule: boolean }[];
+}
+
+export interface MyDataConsent {
+  consent_id: string;
+  scopes: string[];
+  expires_at: string;
+}
+
+export interface MyDataCard {
+  card_id: string;
+  issuer: string;
+  name: string;
+  last4: string;
+  has_card_info: boolean; // 혜택 정보를 아는 카드 (화면에 혜택을 보여 줄 수 있다)
+  has_benefit_rule: boolean; // 배달 즉시할인 규칙이 있는 카드 (추천·결제에 쓰인다)
+  monthly_performance_krw: number;
+  already_added: boolean;
+}
+
+export type CardAddBody =
+  | { source: "MANUAL"; product_id: string }
+  | { source: "MANUAL"; name: string; issuer?: string; last4?: string }
+  | { source: "MYDATA"; consent_id: string; mydata_card_id: string };

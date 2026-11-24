@@ -22,8 +22,10 @@ def test_c01_명세_예시와_같은_결과(client, svc):
     o1, o2 = d["options"]
     assert (o1["rank"], o1["payment_method_id"], o1["instant_discount_krw"], o1["charge_krw"]) == (1, "CARD001", 2000, 18000)
     assert o1["applied_benefits"] == [{"rule_id": "RULE-CARD-A-DELIVERY", "type": "INSTANT_DISCOUNT", "amount_krw": 2000}]
-    assert (o2["payment_method_id"], o2["instant_discount_krw"], o2["charge_krw"]) == ("LOCAL001", 1000, 19000)
-    assert o2["reasons"] == ["지역화폐 즉시할인 5% (가맹점 여부는 추정)"]
+    # 서울페이는 충전식이라 할인이 없다 (명세 예시의 5% 즉시할인은 2026-11-24에 뺐다)
+    assert (o2["payment_method_id"], o2["instant_discount_krw"], o2["charge_krw"]) == ("LOCAL001", 0, 20000)
+    assert o2["applied_benefits"] == []
+    assert o2["reasons"] == ["충전한 잔액에서 사용한 만큼 차감 (가맹점 여부는 추정)"]
     assert d["excluded"] == [{"payment_method_id": "CARD002", "reason_codes": ["PERFORMANCE_NOT_MET"]}]
 
 
@@ -131,7 +133,7 @@ def test_c02_보유_결제수단_조회(client, svc):
     card, local = d["results"][0], d["results"][2]
     assert card["monthly_performance_krw"] == 350000
     assert card["monthly_benefit_remaining_krw"] == 4000  # 월 한도 6,000원 - 이미 받은 2,000원
-    assert local["balance_krw"] == 120000 and local["monthly_benefit_remaining_krw"] == 15000
+    assert local["balance_krw"] == 120000 and local["monthly_benefit_remaining_krw"] is None  # 충전식: 월 할인 한도 없음
     assert card["product_id"] == "PRD-CARD-A"
     only_local = client.get("/benefit/users/U001/payment-methods?type=LOCAL_CURRENCY", headers=svc).json()
     assert [m["payment_method_id"] for m in only_local["results"]] == ["LOCAL001"]
@@ -233,8 +235,8 @@ def test_명세_예시_응답_형태(client, svc, admin):
     d = client.post("/benefit/recommendations", json=body, headers=svc).json()
     assert d["mock"] is True and list(d["options"][0])[0] == "rank"
     assert d["options"][0]["reasons"] == ["배달앱 결제 즉시할인 15%"]
-    assert d["options"][1]["reasons"] == ["지역화폐 즉시할인 5% (가맹점 여부는 추정)"]
-    assert d["options"][1]["instant_discount_krw"] == 1000 and d["options"][1]["charge_krw"] == 19000
+    assert d["options"][1]["reasons"] == ["충전한 잔액에서 사용한 만큼 차감 (가맹점 여부는 추정)"]
+    assert d["options"][1]["instant_discount_krw"] == 0 and d["options"][1]["charge_krw"] == 20000
     assert client.get("/benefit/local-currency/restaurants/STORE101", headers=admin).json() == {
         "restaurant_id": "STORE101", "accepts_livelihood_voucher": True, "local_currency_merchant": True,
         "local_currency_basis": "ASSUMED_FROM_VOUCHER", "checked_at": None, "mock": True}
@@ -303,3 +305,166 @@ def test_서울페이_이름():
     names = {m.payment_method_id: m.name for methods in ledger.MOCK_USERS.values() for m in methods}
     assert names["LOCAL001"] == names["LOCAL101"] == "서울페이(서울사랑상품권)"
     assert products.CARD_PRODUCTS["PRD-LOCAL-A"]["product_name"] == "서울페이(서울사랑상품권)"
+
+
+# ---------- 혜택 규칙이 없는 카드 (내 카드 추가, 로컬 확장) ----------
+class _LedgerWithExternalCard:
+    def get_payment_methods(self, user_id, request_id=None):
+        from app.modules.benefit.domain import PaymentMethod
+
+        return [
+            PaymentMethod("CARD001", "PRD-CARD-A", "CARD", "요기요 신한카드 체크", monthly_performance_krw=350000),
+            PaymentMethod("CARD900", "PRD-EXT-CARD", "CARD", "KB국민 노리2 체크카드 (1209)",
+                          monthly_performance_krw=85000),
+        ]
+
+
+def test_c02_혜택_규칙_유무를_알려_준다(client, svc):
+    ledger.set_ledger(_LedgerWithExternalCard())
+    got = {m["payment_method_id"]: m for m in client.get("/benefit/users/U001/payment-methods", headers=svc).json()["results"]}
+    assert got["CARD001"]["has_benefit_rule"] is True
+    assert got["CARD900"]["has_benefit_rule"] is False and got["CARD900"]["monthly_benefit_remaining_krw"] is None
+
+
+def test_c01_규칙_없는_카드는_후보에서_빠지고_사유가_남는다(client, svc):
+    ledger.set_ledger(_LedgerWithExternalCard())
+    rec = client.post("/benefit/recommendations", json=BODY, headers=svc).json()
+    assert [o["payment_method_id"] for o in rec["options"]] == ["CARD001"]
+    assert {"payment_method_id": "CARD900", "reason_codes": ["RULE_NOT_FOUND"]} in rec["excluded"]
+
+
+def test_c05_규칙_없는_카드는_계속_404(client, svc):
+    ledger.set_ledger(_LedgerWithExternalCard())
+    body = {k: BODY[k] for k in ("request_id", "user_id", "restaurant_id", "menu_subtotal_krw", "delivery_fee_krw") if k in BODY}
+    r = client.post("/benefit/calculations", json={**body, "payment_method_id": "CARD900",
+                                                    "benefit_rule_version": "BEN-V1"}, headers=svc)
+    assert r.status_code == 404 and r.json()["error"]["code"] == "RULE_NOT_FOUND"
+
+
+# ---------- KB국민 노리2(PRD-CARD-D) · 현대카드 ZERO Up(PRD-CARD-E) (내 카드 추가, 로컬 확장) ----------
+class _LedgerWithKbAndHyundai:
+    def __init__(self, kb_performance=250000):
+        self.kb_performance = kb_performance
+
+    def get_payment_methods(self, user_id, request_id=None):
+        from app.modules.benefit.domain import PaymentMethod
+
+        return [
+            PaymentMethod("CARD201", "PRD-CARD-D", "CARD", "KB국민 노리2 체크카드 (KB Pay)",
+                          monthly_performance_krw=self.kb_performance),
+            PaymentMethod("CARD202", "PRD-CARD-E", "CARD", "현대카드 ZERO Up (포인트형)",
+                          monthly_performance_krw=150000),
+        ]
+
+
+def test_노리2는_건당_1만원_이상이면_1000원_할인되고_ZERO_Up은_추천에서_빠진다(client, svc):
+    ledger.set_ledger(_LedgerWithKbAndHyundai())
+    rec = client.post("/benefit/recommendations", json=BODY, headers=svc).json()
+    [kb] = rec["options"]
+    assert (kb["payment_method_id"], kb["instant_discount_krw"], kb["charge_krw"]) == ("CARD201", 1000, 19000)
+    assert kb["applied_benefits"] == [{"rule_id": "RULE-CARD-D-DELIVERY", "type": "INSTANT_DISCOUNT", "amount_krw": 1000}]
+    assert rec["excluded"] == [{"payment_method_id": "CARD202", "reason_codes": ["RULE_NOT_FOUND"]}]
+
+
+def test_노리2는_주문이_1만원_미만이면_할인이_없고_전월실적_20만원_미만이면_제외된다(client, svc):
+    ledger.set_ledger(_LedgerWithKbAndHyundai())
+    small = {**BODY, "menu_subtotal_krw": 7000, "delivery_fee_krw": 2000}  # 합계 9,000원
+    [kb] = client.post("/benefit/recommendations", json=small, headers=svc).json()["options"]
+    assert kb["instant_discount_krw"] == 0 and kb["charge_krw"] == 9000
+    ledger.set_ledger(_LedgerWithKbAndHyundai(kb_performance=199999))
+    rec = client.post("/benefit/recommendations", json=BODY, headers=svc).json()
+    assert rec["options"] == []
+    assert {"payment_method_id": "CARD201", "reason_codes": ["PERFORMANCE_NOT_MET"]} in rec["excluded"]
+
+
+def test_노리2_월_한도_1000원이_C02에_나온다(client, svc):
+    ledger.set_ledger(_LedgerWithKbAndHyundai())
+    got = {m["payment_method_id"]: m for m in client.get("/benefit/users/U001/payment-methods", headers=svc).json()["results"]}
+    assert got["CARD201"]["has_benefit_rule"] is True and got["CARD201"]["monthly_benefit_remaining_krw"] == 1000
+    assert got["CARD202"]["has_benefit_rule"] is False and got["CARD202"]["monthly_benefit_remaining_krw"] is None
+
+
+def test_카드_혜택_화면은_두_카드의_혜택_정보를_보여_준다():
+    from app.modules.benefit import facade
+
+    ledger.set_ledger(_LedgerWithKbAndHyundai())
+    kb = facade.card_dashboard("U001", "CARD201")
+    assert kb["has_benefit_rule"] is True and kb["checked_at"] == "2026-11-24"
+    assert kb["product"]["headline"] == "요기요 건당 1만원 이상 결제 시 1,000원 할인"
+    assert [b["title"] for b in kb["product"]["benefits"]][0] == "배달앱"
+    assert kb["monthly_benefit"] == {"cap_krw": 1000, "used_krw": 0, "remaining_krw": 1000, "min_performance_krw": 200000}
+    assert kb["performance"]["eligible"] is True
+    zero = facade.card_dashboard("U001", "CARD202")
+    assert zero["has_benefit_rule"] is False and zero["product"]["product_name"] == "현대카드 ZERO Up (포인트형)"
+    assert [b["rate"] for b in zero["product"]["benefits"]] == ["2.4% 적립", "1.2% 적립"]
+    assert zero["monthly_benefit"]["cap_krw"] is None and zero["performance"]["eligible"] is False
+    assert zero["performance"]["tiers"] == [] and zero["performance"]["message"] is None
+
+
+def test_신한카드_혜택_화면은_규칙_있음으로_나온다():
+    from app.modules.benefit import facade
+
+    ledger.set_ledger(_LedgerWithExternalCard())
+    got = facade.card_dashboard("U001", "CARD001")
+    assert got["has_benefit_rule"] is True and got["checked_at"] == "2026-11-22"
+    unknown = facade.card_dashboard("U001", "CARD900")  # 정보를 모르는 카드
+    assert unknown["has_benefit_rule"] is False and unknown["checked_at"] is None
+
+
+# ---------- 요기요 삼성카드(PRD-CARD-F) (내 카드 추가, 로컬 확장) ----------
+class _LedgerWithYogiyoSamsung:
+    def __init__(self, performance=420000):
+        self.performance = performance
+
+    def get_payment_methods(self, user_id, request_id=None):
+        from app.modules.benefit.domain import PaymentMethod
+
+        return [PaymentMethod("CARD301", "PRD-CARD-F", "CARD", "요기요 삼성카드",
+                              monthly_performance_krw=self.performance)]
+
+
+def test_요기요_삼성카드는_전월_30만원_이상이면_10퍼센트_할인(client, svc):
+    ledger.set_ledger(_LedgerWithYogiyoSamsung())
+    [opt] = client.post("/benefit/recommendations", json=BODY, headers=svc).json()["options"]  # 합계 2만원
+    assert (opt["payment_method_id"], opt["instant_discount_krw"], opt["charge_krw"]) == ("CARD301", 2000, 18000)
+    assert opt["applied_benefits"][0]["rule_id"] == "RULE-CARD-F-DELIVERY"
+
+
+def test_요기요_삼성카드는_월_한도_6000원까지만_할인하고_30만원_미만이면_제외된다(client, svc):
+    ledger.set_ledger(_LedgerWithYogiyoSamsung())
+    big = {**BODY, "menu_subtotal_krw": 98000, "delivery_fee_krw": 2000}  # 10만원의 10%는 1만원
+    [opt] = client.post("/benefit/recommendations", json=big, headers=svc).json()["options"]
+    assert opt["instant_discount_krw"] == 6000
+    ledger.set_ledger(_LedgerWithYogiyoSamsung(performance=299999))
+    rec = client.post("/benefit/recommendations", json=BODY, headers=svc).json()
+    assert rec["options"] == []
+    assert {"payment_method_id": "CARD301", "reason_codes": ["PERFORMANCE_NOT_MET"]} in rec["excluded"]
+
+
+def test_요기요_삼성카드_혜택_화면(client):
+    from app.modules.benefit import facade
+
+    ledger.set_ledger(_LedgerWithYogiyoSamsung())
+    d = facade.card_dashboard("U001", "CARD301")
+    assert d["has_benefit_rule"] is True and d["product"]["product_name"] == "요기요 삼성카드"
+    assert [b["rate"] for b in d["product"]["benefits"]] == ["10% 결제일할인", "1% 결제일할인", "5% 결제일할인"]
+    assert d["monthly_benefit"] == {"cap_krw": 6000, "used_krw": 0, "remaining_krw": 6000, "min_performance_krw": 300000}
+    perf = d["performance"]
+    assert perf["eligible"] is True and [t["cap_krw"] for t in perf["tiers"]] == [6000, 12000, 20000]
+    assert perf["current"]["min_krw"] == 300000 and perf["next"]["min_krw"] == 600000 and perf["to_next_krw"] == 180000
+
+
+# ---------- 서울페이: 할인 없는 충전식 잔액 ----------
+def test_서울페이는_할인_없이_쓴_만큼_차감된다(client, svc):
+    r = client.post("/benefit/calculations", json={**CALC, "payment_method_id": "LOCAL001"}, headers=svc).json()
+    assert r["eligible"] is True and r["instant_discount_krw"] == 0 and r["charge_krw"] == 20000
+    assert r["applied_benefits"] == [] and r["reason_codes"] == []
+
+
+def test_서울페이_혜택_화면은_잔액만_보여_준다():
+    from app.modules.benefit import facade
+
+    d = facade.card_dashboard("U001", "LOCAL001")
+    assert d["has_benefit_rule"] is True and d["balance_krw"] == 120000 and d["performance"] is None
+    assert d["monthly_benefit"]["cap_krw"] is None and d["monthly_benefit"]["remaining_krw"] is None
+    assert d["product"]["benefits"][0]["rate"] == "쓴 만큼 차감"

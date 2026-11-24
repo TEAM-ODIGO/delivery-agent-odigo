@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from e_payment import fep, nfc, schemas, service
+from e_payment import cards, fep, nfc, schemas, service
 from e_payment.config import Settings, settings as default_settings
 from e_payment.db import Base, SessionLocal, engine, get_session
 from e_payment.dclient import DClient, HttpDClient
@@ -198,6 +198,35 @@ def create_app(
     @app.get("/internal/payment-methods", dependencies=[Auth], summary="E-11 결제수단 원장 조회 (C → E)")
     def e11(db: DB, user_id: Annotated[str, Query(min_length=1)], type: str | None = None):
         return service.list_methods(db, user_id, type)
+
+    # ---------------- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전) ----------------
+    @app.get("/internal/card-catalog", dependencies=[Auth], summary="(로컬 확장) 혜택 규칙이 있는 카드 목록")
+    def card_catalog():
+        return cards.catalog()
+
+    @app.post("/internal/mock-mydata/consents", status_code=201, dependencies=[Auth],
+              summary="(로컬 확장) 모의 마이데이터 정보제공 동의")
+    def mydata_consent(body: schemas.MyDataConsentRequest, db: DB):
+        return cards.create_consent(db, body.user_id)
+
+    @app.get("/internal/mock-mydata/cards", dependencies=[Auth], summary="(로컬 확장) 모의 마이데이터 카드 목록")
+    def mydata_cards(db: DB, user_id: Annotated[str, Query(min_length=1)],
+                     consent_id: Annotated[str, Query(min_length=1)]):
+        return cards.list_mydata_cards(db, user_id, consent_id)
+
+    @app.post("/internal/payment-methods", status_code=201, dependencies=[Auth],
+              summary="(로컬 확장) 내 카드 추가 (직접 입력 · 모의 마이데이터)")
+    def register_card(body: schemas.CardRegisterRequest, db: DB):
+        return cards.register_card(db, body.model_dump(), service.method_item)
+
+    @app.get("/internal/card-registrations", dependencies=[Auth], summary="(로컬 확장) 직접 추가한 카드 목록")
+    def card_registrations(db: DB, user_id: Annotated[str, Query(min_length=1)]):
+        return cards.list_registrations(db, user_id)
+
+    @app.delete("/internal/payment-methods/{payment_method_id}", dependencies=[Auth],
+                summary="(로컬 확장) 직접 추가한 카드 빼기")
+    def remove_card(payment_method_id: str, db: DB, user_id: Annotated[str, Query(min_length=1)]):
+        return cards.remove_card(db, user_id, payment_method_id)
 
     @app.get("/health", summary="E 상태 확인 (인증 없음)")
     def health(db: DB):

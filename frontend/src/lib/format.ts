@@ -78,6 +78,7 @@ export const EXCLUDE_REASON: Record<string, string> = {
   LOCAL_CURRENCY_INSUFFICIENT_BALANCE: "잔액 부족",
   PAYMENT_METHOD_NOT_ACTIVE: "사용 중지된 수단",
   PAYMENT_REQUIREMENT_NOT_MET: "결제 조건 불충족",
+  RULE_NOT_FOUND: "혜택 규칙 없는 카드", // 내 카드 추가로 넣은 다른 카드사 카드 (로컬 확장)
 };
 
 // 실패 코드 → 기본 문구 (error.message가 없을 때)

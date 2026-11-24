@@ -42,6 +42,8 @@ def _real_c():
         recommend = staticmethod(facade.recommend)
         calculate = staticmethod(facade.calculate)
         list_methods = staticmethod(facade.list_payment_methods)
+        record_usage = staticmethod(facade.record_usage)  # 로컬 확장: 결제 승인 → 남은 혜택 차감
+        reverse_usage = staticmethod(facade.reverse_usage)  # 로컬 확장: 환불 → 되돌림
 
     return RealC()
 

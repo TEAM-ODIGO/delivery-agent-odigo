@@ -108,3 +108,11 @@ def test_금액이_아닌_사유로_못_쓰면_None():
 def test_지역화폐_불가_가게는_카드의_최소주문금액이_기준():
     shop = Restaurant("S", False, False, "ASSUMED_FROM_VOUCHER")
     assert min_order_shortfall([CARD, LOCAL], RULES, 13000, shop) == 15000
+
+
+def test_혜택_규칙이_없는_카드는_추천에서_제외된다():
+    # 내 카드 추가(로컬 확장)로 들어온 다른 카드사 카드: 규칙이 없으면 선택지로 보여 주지 않는다
+    ext = PaymentMethod("CARD900", "PRD-EXT-CARD", "CARD", monthly_performance_krw=85000)
+    options, excluded = recommend([CARD, ext], RULES, 35000, OK_SHOP)
+    assert ids(options) == ["CARD001"]
+    assert excluded == [{"payment_method_id": "CARD900", "reason_codes": ["RULE_NOT_FOUND"]}]

@@ -40,6 +40,7 @@
 
 ## 참고: 남은 불일치
 
-C-01은 `MIN_ORDER_NOT_MET`·`RULE_NOT_FOUND`·`BENEFIT_LIMIT_EXCEEDED`인 수단을 "혜택 없음" 선택지로 남기지만,
+C-01은 `MIN_ORDER_NOT_MET`·`BENEFIT_LIMIT_EXCEEDED`인 수단을 "혜택 없음" 선택지로 남기지만,
 B-05는 `eligible=false`를 거절한다. 이번 변경은 금액 미달만 후보 단계에서 막는다.
-나머지 두 경우와 C-01의 선택지 정책은 팀 협의가 필요하다.
+나머지 경우와 C-01의 선택지 정책은 팀 협의가 필요하다.
+(`RULE_NOT_FOUND`는 "내 카드 추가"로 혜택 규칙이 없는 카드가 생기면서 C-01 후보에서 제외로 바꿨다. `MY_CARDS.md` 참고.)

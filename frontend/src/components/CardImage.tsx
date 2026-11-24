@@ -13,22 +13,34 @@ const RATIO = 1.586; // 신용카드 긴 변 : 짧은 변
 
 // 같은 카드 상품을 쓰는 다른 사용자의 결제수단 ID는 같은 이미지를 쓴다
 const SAME_IMAGE: Record<string, string> = { CARD101: "CARD001", LOCAL101: "LOCAL001" };
+// 내 카드 추가로 새 ID가 생긴 카드도 같은 상품이면 같은 이미지를 쓴다 (상품 ID를 알 때)
+const PRODUCT_IMAGE: Record<string, string> = {
+  "PRD-CARD-A": "CARD001",
+  "PRD-CARD-B": "CARD002",
+  "PRD-CARD-C": "CARD003",
+  "PRD-CARD-D": "PRD-CARD-D", // KB국민 노리2
+  "PRD-CARD-E": "PRD-CARD-E", // 현대카드 ZERO Up
+  "PRD-CARD-F": "PRD-CARD-F", // 요기요 삼성카드
+  "PRD-LOCAL-A": "LOCAL001",
+};
 
 // long: 카드의 긴 변 길이(px). 세로형이면 높이, 가로형이면 너비가 된다. (가로형은 글자 자리가 모자라지 않게 조금 작게)
 export function CardImage({
   id,
   name,
   type,
+  productId,
   long = LANDSCAPE ? 72 : 88,
 }: {
   id: string;
   name: string;
   type?: string | null;
+  productId?: string | null;
   long?: number;
 }) {
   const [tried, setTried] = useState(0); // 지금까지 실패한 확장자 수
   const [loaded, setLoaded] = useState(false);
-  const file = SAME_IMAGE[id] ?? id;
+  const file = SAME_IMAGE[id] ?? (productId ? PRODUCT_IMAGE[productId] : undefined) ?? id;
   const short = Math.round(long / RATIO);
   // 기본 카드 모양에는 괄호 앞 이름만 쓴다 (예: "서울페이(서울사랑상품권)" → "서울페이"). 칸이 작아 긴 이름은 잘린다
   const label = name.replace(/\s*\(.*\)\s*$/, "").trim() || name;

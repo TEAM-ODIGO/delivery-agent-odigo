@@ -65,7 +65,7 @@ from app.modules.orchestrator.ports import (
     PaymentResponseLost,
     RecommendationPort,
 )
-from app.modules.orchestrator.schemas import RefundCreate, RunCreate
+from app.modules.orchestrator.schemas import CardAdd, RefundCreate, RunCreate
 
 CATALOG_VERSION = "CAT-V1"
 TRANSIENT = (TimeoutError, ConnectionError, httpx.TransportError)
@@ -371,7 +371,68 @@ class OrchestratorService:
                 refund = self._card_port("get_refund")(payment_id, refund["refund_id"])
             except AppError:
                 pass  # 결과 확인만 실패: 접수된 상태(PENDING)로 돌려준다
+        if refund.get("status") == "REFUNDED":  # 남은 금액 전부를 돌려줬으니 그 결제로 받은 혜택도 되돌린다
+            reverse = getattr(self.c, "reverse_usage", None)
+            if reverse is not None:
+                try:
+                    reverse(payment_id)
+                except Exception:  # noqa: BLE001 - 환불 결과를 막지 않는다
+                    pass
         return {"payment_id": payment_id, **refund}
+
+    # ================================================================ 내 카드 추가 (로컬 확장, 팀 합의 전)
+    def my_cards(self, user_id: str) -> dict:
+        """내 결제수단 목록 + 카드마다 어떻게 들어왔는지(직접 추가·마이데이터)와 뺄 수 있는지.
+        결제수단은 C-02, 등록 정보는 E. E 등록 정보를 못 읽어도 목록은 그대로 보여 준다."""
+        res = self.c.list_methods(user_id)
+        registered: dict[str, dict] = {}
+        lookup = getattr(self.e, "list_card_registrations", None)
+        if lookup is not None:
+            try:
+                registered = {r["payment_method_id"]: r for r in lookup(user_id).get("results", [])}
+            except AppError:
+                registered = {}
+        results = []
+        for m in res.get("results", []):
+            reg = registered.get(m["payment_method_id"])
+            results.append({
+                "payment_method_id": m["payment_method_id"],
+                "name": m.get("name"),
+                "type": m.get("type"),
+                "status": m.get("status", "ACTIVE"),
+                "product_id": m.get("product_id"),
+                "has_benefit_rule": m.get("has_benefit_rule", True),
+                "balance_krw": m.get("balance_krw"),
+                "monthly_performance_krw": m.get("monthly_performance_krw"),
+                "monthly_benefit_remaining_krw": m.get("monthly_benefit_remaining_krw"),
+                "source": reg["source"] if reg else None,
+                "last4": reg.get("last4") if reg else None,
+                "removable": reg is not None,
+            })
+        return {"count": len(results), "results": results, "can_add": hasattr(self.e, "register_card")}
+
+    def my_card_catalog(self) -> dict:
+        return self._my_cards_port("card_catalog")()
+
+    def start_mydata(self, user_id: str) -> dict:
+        """모의 마이데이터 정보제공 동의 (진짜 마이데이터가 아니다)."""
+        return self._my_cards_port("create_mydata_consent")(user_id)
+
+    def mydata_cards(self, user_id: str, consent_id: str) -> dict:
+        return self._my_cards_port("list_mydata_cards")(user_id, consent_id)
+
+    def add_card(self, user_id: str, body: CardAdd) -> dict:
+        return self._my_cards_port("register_card")({"user_id": user_id, **body.model_dump(exclude_none=True)})
+
+    def remove_card(self, user_id: str, payment_method_id: str) -> dict:
+        return self._my_cards_port("remove_card")(user_id, payment_method_id)
+
+    def _my_cards_port(self, name: str) -> Callable[..., dict]:
+        fn = getattr(self.e, name, None)
+        if fn is None:
+            raise AppError(503, "MY_CARDS_UNAVAILABLE",
+                           "카드 추가는 모의결제 서버(E)를 연결해야 쓸 수 있어요. (.env의 E_PAYMENT_URL·E_BASE_URL)")
+        return fn
 
     def _card_port(self, name: str) -> Callable[..., dict]:
         fn = getattr(self.e, name, None)
@@ -1122,6 +1183,7 @@ class OrchestratorService:
             ]
         result["order"] = self._order_view(run)
         if status == "APPROVED":
+            self._record_benefit_usage(run, res)
             self._to(run, RunState.COMPLETED, prompt=None, result=result, service="E")
         elif status == "FAILED":
             self._to(
@@ -1157,6 +1219,28 @@ class OrchestratorService:
                 result=result,
                 service="E",
                 detail={"execution_id": exe},
+            )
+
+    def _record_benefit_usage(self, run: Run, res: dict) -> None:
+        """결제가 승인되면 받은 할인액을 C의 '이번 달 받은 혜택'에 더한다 (로컬 확장, 팀 합의 전).
+
+        분할결제여도 할인은 카드 몫에만 붙는다(충전식 지역화폐는 할인이 없다) → 카드 기준으로 기록한다.
+        같은 payment_id는 C가 한 번만 반영하므로 reconcile이 다시 불러도 안전하다.
+        C가 이 기능을 모르거나(가짜 C) 실패해도 결제 결과는 그대로 둔다.
+        """
+        record = getattr(self.c, "record_usage", None)
+        q = run.context.get("target_quote") or {}
+        amount = q.get("instant_discount_krw") or 0
+        if record is None or not res.get("payment_id") or amount <= 0:
+            return
+        try:
+            record(res["payment_id"], q["payment_method_id"], amount)
+        except Exception as exc:  # noqa: BLE001 - 남은 혜택 표시용 누적일 뿐
+            self._event(
+                run,
+                RunEventType.SERVICE_ERROR,
+                service="C",
+                detail={"api": "C-USAGE", "code": getattr(exc, "code", type(exc).__name__)},
             )
 
     def _record_payment_result(self, run: Run, res: dict) -> None:
