@@ -48,4 +48,5 @@ E-01에 선택 필드 `local_currency_payment_method_id`, `local_currency_charge
 ## 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전)
 `GET /internal/card-catalog`, `POST /internal/mock-mydata/consents`, `GET /internal/mock-mydata/cards`, `POST·DELETE /internal/payment-methods`, `GET /internal/card-registrations`.
 카드는 `e_payment_method`에 들어가므로 E-11·E-01은 그대로 쓴다. 등록 기록용 새 표 2개(`e_card_registration`, `e_mydata_consent`)만 자동으로 생겨서 **기존 `e.db`를 지우지 않아도 된다.**
+모의 마이데이터 카드는 6장이다 (신한 3 · KB국민 노리2 · 현대카드 ZERO Up · 요기요 삼성카드). 카드 정보를 아는 상품은 `cards.PRODUCTS`(C의 상품 ID와 같다)에 있다.
 진짜 마이데이터가 아니고, 카드 번호 전체는 받지 않는다 (끝 4자리만). 자세한 규칙: `../backend/docs/MY_CARDS.md`.

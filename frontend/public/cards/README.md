@@ -8,6 +8,9 @@
 | `CARD002.png` | 신한카드 구독 좋아요 |
 | `CARD003.png` | 신한카드 Deep On Platinum+ |
 | `LOCAL001.png` | 가상 지역화폐 (없으면 기본 모양) |
+| `PRD-CARD-D.png` | KB국민 노리2 체크카드 (내 카드 추가로 들어오는 카드는 상품 ID로 짓는다) |
+| `PRD-CARD-E.png` | 현대카드 ZERO Up |
+| `PRD-CARD-F.png` | 요기요 삼성카드 |
 
 - 확장자는 png, jpg, jpeg, webp, svg 중 아무거나 된다.
 - 이미지 파일은 **세로형**(가로:세로 약 1 : 1.586, 신용카드를 세운 모양)으로 넣는다.

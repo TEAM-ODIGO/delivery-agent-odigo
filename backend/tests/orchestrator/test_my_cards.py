@@ -28,7 +28,9 @@ class StubE:
 
     def card_catalog(self):
         return {
-            "supported": [{"product_id": "PRD-CARD-A", "name": "요기요 신한카드 체크"}],
+            "products": [
+                {"product_id": "PRD-CARD-A", "name": "요기요 신한카드 체크", "has_benefit_rule": True}
+            ],
             "mock": True,
         }
 
@@ -130,7 +132,7 @@ def test_my_cards_list_survives_a_failing_registration_lookup(client, stub):
 
 def test_mydata_flow_uses_the_logged_in_user_only(client, stub):
     assert (
-        client.get("/orchestrator/my-cards/catalog", headers=USER).json()["supported"][0][
+        client.get("/orchestrator/my-cards/catalog", headers=USER).json()["products"][0][
             "product_id"
         ]
         == "PRD-CARD-A"

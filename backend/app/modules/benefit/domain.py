@@ -107,9 +107,16 @@ def calculate(method: PaymentMethod, rule: BenefitRule | None, order_krw: int, r
     discount = min(discount, share)
 
     estimated = restaurant.local_currency_basis == "ASSUMED_FROM_VOUCHER"
+    if discount:
+        reasons = [_reason_text(method, rule, discount, estimated)]
+    elif method.type == "LOCAL_CURRENCY":
+        # 충전식 지역화폐는 할인이 없다. 쓴 만큼 충전한 잔액에서 차감된다는 것만 알려 준다.
+        reasons = ["충전한 잔액에서 사용한 만큼 차감" + (" (가맹점 여부는 추정)" if estimated else "")]
+    else:
+        reasons = []
     return Calc(method.payment_method_id, True, discount, share - discount,
                 [{"rule_id": rule.rule_id, "type": rule.type, "amount_krw": discount}] if discount else [],
-                [], [_reason_text(method, rule, discount, estimated)] if discount else [])
+                [], reasons)
 
 
 # 추천에서 "후보 제외(excluded)"로 분류하는 사유. 나머지(MIN_ORDER_NOT_MET)는 할인 0원으로 후보에 남는다.

@@ -18,6 +18,9 @@ const PRODUCT_IMAGE: Record<string, string> = {
   "PRD-CARD-A": "CARD001",
   "PRD-CARD-B": "CARD002",
   "PRD-CARD-C": "CARD003",
+  "PRD-CARD-D": "PRD-CARD-D", // KB국민 노리2
+  "PRD-CARD-E": "PRD-CARD-E", // 현대카드 ZERO Up
+  "PRD-CARD-F": "PRD-CARD-F", // 요기요 삼성카드
   "PRD-LOCAL-A": "LOCAL001",
 };
 

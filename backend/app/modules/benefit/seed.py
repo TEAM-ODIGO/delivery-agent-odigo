@@ -58,7 +58,17 @@ RULE_VERSIONS: dict[str, list[BenefitRule]] = {
         BenefitRule("RULE-CARD-C-DELIVERY", "PRD-CARD-C", discount_percent=20,
                     max_discount_krw=10000, min_order_krw=20000, min_performance_krw=300000,
                     monthly_cap_krw=10000),
-        BenefitRule("RULE-LOCAL-A-DISCOUNT", "PRD-LOCAL-A", discount_percent=5, monthly_cap_krw=15000),
+        # KB국민 노리2 체크카드(KB Pay): 배달의민족·요기요 건당 1만원 이상 결제 시 1,000원 할인,
+        # 전월 이용실적 20만원 이상, 월 1회(월 한도 1,000원). 안내문 기준 (2026-11-24, 로컬 확장)
+        BenefitRule("RULE-CARD-D-DELIVERY", "PRD-CARD-D", discount_krw=1000, min_order_krw=10000,
+                    min_performance_krw=200000, monthly_cap_krw=1000),
+        # 요기요 삼성카드: 요기요 10% 결제일할인, 전월 이용금액 30만원 이상, 월 한도 6천원(30만원대 구간).
+        # 60만원 이상 1.2만원·90만원 이상 2만원 구간과 30만원 미만 1% 할인은 규칙 모델에 없어 화면 정보로만 보여 준다.
+        BenefitRule("RULE-CARD-F-DELIVERY", "PRD-CARD-F", discount_percent=10,
+                    min_performance_krw=300000, monthly_cap_krw=6000),
+        # 서울페이(서울사랑상품권): 충전식 잔액. 할인·적립 없이 사용한 만큼 잔액에서 차감한다 (2026-11-24 변경).
+        # 규칙을 아예 없애면 RULE_NOT_FOUND로 추천에서 빠지고 C-05가 404라서, 할인 0원인 규칙을 둔다.
+        BenefitRule("RULE-LOCAL-A-PREPAID", "PRD-LOCAL-A"),
     ],
 }
 
@@ -77,7 +87,9 @@ DEFAULT_RESTAURANTS = dict(RESTAURANTS)
 # 이번 달 이미 받은 혜택 금액. E-11 응답에는 이 값이 없어서 임시로 C에 둔다. (협의 필요)
 BENEFIT_USED_KRW = {"CARD001": 2000, "CARD002": 0, "CARD003": 0, "LOCAL001": 0}
 
-PRODUCT_TYPES = {"PRD-CARD-A": "CARD", "PRD-CARD-B": "CARD", "PRD-CARD-C": "CARD", "PRD-LOCAL-A": "LOCAL_CURRENCY"}
+PRODUCT_TYPES = {"PRD-CARD-A": "CARD", "PRD-CARD-B": "CARD", "PRD-CARD-C": "CARD",
+                 "PRD-CARD-D": "CARD", "PRD-CARD-E": "CARD", "PRD-CARD-F": "CARD",
+                 "PRD-LOCAL-A": "LOCAL_CURRENCY"}
 
 
 # ---------- 테스트·재시작용 초기 상태 ----------

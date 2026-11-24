@@ -30,7 +30,7 @@ export function useCardDashboard(cardTap: CardTap | null, paymentMethodId?: stri
 export function CardDashboardSections({ d, onRefunded }: { d: CardDashboard; onRefunded: () => void }) {
   return (
     <>
-      {d.type === "CARD" ? <PerformanceCard d={d} /> : <BalanceCard d={d} />}
+      {d.type !== "CARD" ? <BalanceCard d={d} /> : d.has_benefit_rule ? <PerformanceCard d={d} /> : <UsageOnlyCard d={d} />}
       <BenefitLimitCard d={d} />
       <RecentPayments d={d} onRefunded={onRefunded} />
       <BenefitList d={d} />
@@ -100,6 +100,25 @@ function CardHero({ d }: { d: CardDashboard }) {
         {d.product.card_kind && <span className="card-hero-kind">{d.product.card_kind}</span>}
       </div>
       {d.product.headline && <span className="card-hero-sub">{d.product.headline}</span>}
+    </div>
+  );
+}
+
+// 배달 할인 규칙이 없는 카드(적립형 카드, 혜택 정보를 모르는 카드): 실적 구간·"실적 미달"을 보여 주면 오해라서 이용액만 보여 준다
+function UsageOnlyCard({ d }: { d: CardDashboard }) {
+  const p = d.performance!;
+  return (
+    <div className="card">
+      <div className="title-row">
+        <b>이번 달 이용액</b>
+        <Tag tone="gray">배달 할인 계산 안 함</Tag>
+      </div>
+      <span className="big-price">{krw(p.monthly_performance_krw)}</span>
+      <Banner tone="pri">
+        {d.product.product_name
+          ? "이 카드는 결제 금액이 바로 줄어드는 배달 할인 규칙이 없어요. 오디고 추천·결제 계산에는 쓰이지 않고, 아래 혜택 정보만 보여 드려요."
+          : "이 카드의 혜택 정보를 아직 몰라요. 오디고 추천·결제 계산에는 쓰이지 않아요."}
+      </Banner>
     </div>
   );
 }

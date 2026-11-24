@@ -2,6 +2,7 @@
 오류는 AppError로 던진다. (HTTP로 나갈 때는 errors.py가 공통 형식으로 변환)"""
 import hashlib
 import json
+import threading
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -27,11 +28,15 @@ def now() -> datetime:
 
 _syncs: dict[str, dict] = {}               # c_local_currency_sync 테이블 대신 메모리
 _extractions: dict[str, dict] = {}
+# 결제가 승인될 때 남긴 '이번 달 받은 혜택' 기록 (로컬 확장, 팀 합의 전). payment_id → 기록.
+# 같은 결제를 두 번 더하지 않고, 환불하면 정확히 그만큼만 되돌리려고 결제별로 따로 둔다.
+_usage_by_payment: dict[str, dict] = {}
+_usage_lock = threading.Lock()
 
 
 def reset_state() -> None:
     _recommendations.clear(); _latest_by_request.clear(); _idempotency.clear()
-    _syncs.clear(); _extractions.clear()
+    _syncs.clear(); _extractions.clear(); _usage_by_payment.clear()
     seed.reset()
 
 
@@ -205,7 +210,8 @@ def card_benefit_summary(user_id: str, payment_method_id: str, request_id: str |
         "benefit_rule_version": version,
         "product": {k: product.get(k) for k in ("product_name", "card_kind", "annual_fee", "issuance",
                                                  "headline", "tier_label", "benefits", "notes", "source_url")},
-        "checked_at": products.CHECKED_AT if product else None,
+        "checked_at": (product.get("checked_at") or products.CHECKED_AT) if product else None,
+        "has_benefit_rule": rule is not None,  # false면 추천·결제에 쓰이지 않는다 (로컬 확장)
         "monthly_benefit": {
             "cap_krw": rule.monthly_cap_krw if rule else None,
             "used_krw": used,
@@ -228,6 +234,44 @@ def card_benefit_summary(user_id: str, payment_method_id: str, request_id: str |
         out["performance"] = None
         out["balance_krw"] = method.balance_krw
     return out
+
+
+# ---------- 이번 달 받은 혜택 기록 (로컬 확장, 명세 밖) ----------
+def record_benefit_usage(payment_id: str, payment_method_id: str, amount_krw: int) -> dict:
+    """결제가 승인되면 O가 부른다. 받은 할인액을 이번 달 사용액(seed.BENEFIT_USED_KRW)에 더해 '남은 혜택'을 줄인다.
+
+    - 같은 payment_id는 한 번만 반영한다 (reconcile이 같은 결과를 다시 알려 줘도 두 번 깎이지 않는다).
+    - 할인이 0원인 결제(서울페이·적립형 카드 등)는 남길 것이 없다.
+    - E-11 원장에 이 값이 없어서 C가 메모리에 든다. 서버를 다시 켜면 시드값으로 돌아간다. (협의 필요)
+    """
+    amount = max(int(amount_krw or 0), 0)
+    with _usage_lock:
+        prev = _usage_by_payment.get(payment_id)
+        if prev is not None:
+            return {**prev, "recorded": False, "used_krw": seed.BENEFIT_USED_KRW.get(prev["payment_method_id"], 0)}
+        if amount == 0:
+            return {"payment_id": payment_id, "payment_method_id": payment_method_id, "amount_krw": 0,
+                    "reversed": False, "recorded": False,
+                    "used_krw": seed.BENEFIT_USED_KRW.get(payment_method_id, 0)}
+        used = seed.BENEFIT_USED_KRW.get(payment_method_id, 0) + amount
+        seed.BENEFIT_USED_KRW[payment_method_id] = used
+        rec = {"payment_id": payment_id, "payment_method_id": payment_method_id,
+               "amount_krw": amount, "reversed": False}
+        _usage_by_payment[payment_id] = rec
+        return {**rec, "recorded": True, "used_krw": used}
+
+
+def reverse_benefit_usage(payment_id: str) -> dict:
+    """환불이 끝나면 O가 부른다. 그 결제로 받았던 할인액만큼 이번 달 사용액을 되돌린다 (한 번만)."""
+    with _usage_lock:
+        rec = _usage_by_payment.get(payment_id)
+        if rec is None or rec["reversed"]:
+            return {"payment_id": payment_id, "amount_krw": 0, "reversed": False}
+        pm = rec["payment_method_id"]
+        used = max(seed.BENEFIT_USED_KRW.get(pm, 0) - rec["amount_krw"], 0)
+        seed.BENEFIT_USED_KRW[pm] = used
+        rec["reversed"] = True
+        return {**rec, "used_krw": used}
 
 
 # ---------- C-05 혜택 재계산 ----------

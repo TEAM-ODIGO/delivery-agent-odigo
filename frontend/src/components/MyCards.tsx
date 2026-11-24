@@ -302,7 +302,13 @@ function MyDataList({
               {c.issuer} · 끝 {c.last4} · 이번 달 {krw(c.monthly_performance_krw)}
             </span>
             <span className="mc-tags">
-              {c.supported ? <Tag tone="ok">혜택 규칙 있음</Tag> : <Tag tone="warn">혜택 규칙 없음</Tag>}
+              {c.has_benefit_rule ? (
+                <Tag tone="ok">배달 할인 계산에 쓰여요</Tag>
+              ) : c.has_card_info ? (
+                <Tag tone="gray">혜택 정보만 보여요</Tag>
+              ) : (
+                <Tag tone="warn">혜택 정보 없음</Tag>
+              )}
             </span>
           </div>
           {c.already_added ? (
@@ -314,8 +320,8 @@ function MyDataList({
           )}
         </div>
       ))}
-      {list.some((c) => !c.supported && !c.already_added) && (
-        <Banner tone="warn">혜택 규칙이 없는 카드는 넣어도 추천과 결제에는 쓰이지 않아요.</Banner>
+      {list.some((c) => !c.has_benefit_rule && !c.already_added) && (
+        <Banner tone="warn">배달 할인 규칙이 없는 카드는 넣어도 추천과 결제에는 쓰이지 않아요.</Banner>
       )}
       <Button onClick={onDone}>완료</Button>
     </>
@@ -356,15 +362,17 @@ function Manual({ onAdded }: { onAdded: () => void }) {
 
   return (
     <>
-      <p className="muted">혜택 규칙이 있는 카드를 고르거나, 다른 카드를 직접 적어요.</p>
+      <p className="muted">혜택 정보를 아는 카드를 고르거나, 다른 카드를 직접 적어요.</p>
       {catalog.isLoading && <p className="muted">불러오는 중…</p>}
       {catalog.isError && <Banner tone="bad">{message(catalog.error, "카드 목록을 불러오지 못했어요.")}</Banner>}
-      {catalog.data?.supported.map((p) => (
+      {catalog.data?.products.map((p) => (
         <label className="pm-row" key={p.product_id}>
           <input className="round" type="radio" name="mc-card" checked={choice === p.product_id} onChange={() => setChoice(p.product_id)} />
           <span>
             <b>{p.name}</b>
-            <span className="muted">혜택 규칙 있음</span>
+            <span className="muted">
+              {p.has_benefit_rule ? "배달 할인 계산에 쓰여요" : "혜택 정보만 보여 주고, 추천·결제에는 쓰이지 않아요"}
+            </span>
           </span>
         </label>
       ))}
@@ -372,12 +380,12 @@ function Manual({ onAdded }: { onAdded: () => void }) {
         <input className="round" type="radio" name="mc-card" checked={other} onChange={() => setChoice(OTHER)} />
         <span>
           <b>그 밖의 카드</b>
-          <span className="muted">혜택 규칙이 없어서 추천과 결제에는 쓰이지 않아요</span>
+          <span className="muted">혜택 정보가 없어서 추천과 결제에는 쓰이지 않아요</span>
         </span>
       </label>
       {other && (
         <div className="mc-form">
-          <input className="input" placeholder="카드 이름 (예: 삼성 iD ON 카드)" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} aria-label="카드 이름" />
+          <input className="input" placeholder="카드 이름 (예: 롯데 LOCA 카드)" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} aria-label="카드 이름" />
           <input className="input" placeholder="카드사 (선택)" maxLength={20} value={issuer} onChange={(e) => setIssuer(e.target.value)} aria-label="카드사" />
           <input
             className="input"

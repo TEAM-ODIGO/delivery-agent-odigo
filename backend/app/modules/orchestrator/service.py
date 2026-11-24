@@ -371,6 +371,13 @@ class OrchestratorService:
                 refund = self._card_port("get_refund")(payment_id, refund["refund_id"])
             except AppError:
                 pass  # 결과 확인만 실패: 접수된 상태(PENDING)로 돌려준다
+        if refund.get("status") == "REFUNDED":  # 남은 금액 전부를 돌려줬으니 그 결제로 받은 혜택도 되돌린다
+            reverse = getattr(self.c, "reverse_usage", None)
+            if reverse is not None:
+                try:
+                    reverse(payment_id)
+                except Exception:  # noqa: BLE001 - 환불 결과를 막지 않는다
+                    pass
         return {"payment_id": payment_id, **refund}
 
     # ================================================================ 내 카드 추가 (로컬 확장, 팀 합의 전)
@@ -1176,6 +1183,7 @@ class OrchestratorService:
             ]
         result["order"] = self._order_view(run)
         if status == "APPROVED":
+            self._record_benefit_usage(run, res)
             self._to(run, RunState.COMPLETED, prompt=None, result=result, service="E")
         elif status == "FAILED":
             self._to(
@@ -1211,6 +1219,28 @@ class OrchestratorService:
                 result=result,
                 service="E",
                 detail={"execution_id": exe},
+            )
+
+    def _record_benefit_usage(self, run: Run, res: dict) -> None:
+        """결제가 승인되면 받은 할인액을 C의 '이번 달 받은 혜택'에 더한다 (로컬 확장, 팀 합의 전).
+
+        분할결제여도 할인은 카드 몫에만 붙는다(충전식 지역화폐는 할인이 없다) → 카드 기준으로 기록한다.
+        같은 payment_id는 C가 한 번만 반영하므로 reconcile이 다시 불러도 안전하다.
+        C가 이 기능을 모르거나(가짜 C) 실패해도 결제 결과는 그대로 둔다.
+        """
+        record = getattr(self.c, "record_usage", None)
+        q = run.context.get("target_quote") or {}
+        amount = q.get("instant_discount_krw") or 0
+        if record is None or not res.get("payment_id") or amount <= 0:
+            return
+        try:
+            record(res["payment_id"], q["payment_method_id"], amount)
+        except Exception as exc:  # noqa: BLE001 - 남은 혜택 표시용 누적일 뿐
+            self._event(
+                run,
+                RunEventType.SERVICE_ERROR,
+                service="C",
+                detail={"api": "C-USAGE", "code": getattr(exc, "code", type(exc).__name__)},
             )
 
     def _record_payment_result(self, run: Run, res: dict) -> None:

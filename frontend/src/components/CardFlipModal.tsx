@@ -20,6 +20,10 @@ const FACE_IMAGE: Record<string, { local: string; official?: string }> = {
   "PRD-CARD-B": { local: "/images/cards/card-b", official: `${PLATE}/BNCD4E_E5_v_f_s.png` }, // 신한카드 구독 좋아요
   "PRD-CARD-C": { local: "/images/cards/card-c", official: `${PLATE}/AXDBMR_00_h_f_s.png` }, // 신한카드 Deep On Platinum+
   "PRD-LOCAL-A": { local: "/images/cards/local-a" }, // 가상 지역화폐 (공식 이미지 없음)
+  // 내 카드 추가로 들어오는 다른 카드사 카드: 결제수단 목록과 같은 파일(public/cards/)을 쓴다
+  "PRD-CARD-D": { local: "/cards/PRD-CARD-D" }, // KB국민 노리2 체크카드
+  "PRD-CARD-E": { local: "/cards/PRD-CARD-E" }, // 현대카드 ZERO Up
+  "PRD-CARD-F": { local: "/cards/PRD-CARD-F" }, // 요기요 삼성카드
 };
 const IMAGE_EXTS = ["png", "jpg", "webp"];
 
@@ -35,6 +39,9 @@ const FACE_TONE: Record<string, string> = {
   "PRD-CARD-B": "tone-b",
   "PRD-CARD-C": "tone-c",
   "PRD-LOCAL-A": "tone-local",
+  "PRD-CARD-D": "tone-d",
+  "PRD-CARD-E": "tone-e",
+  "PRD-CARD-F": "tone-f",
 };
 
 // cardTap(NFC 카드를 댔을 때) 또는 paymentMethodId(설정 화면 ⋮) 중 하나로 연다

@@ -3,8 +3,9 @@
 - 진짜 마이데이터가 아니다. 진짜 마이데이터는 본인신용정보관리업 허가를 받은 사업자만 연동할 수 있어서,
   여기서는 "동의 → 카드 목록 → 선택" 흐름만 흉내 내고 카드 목록은 아래 고정 목록(MYDATA_CARDS)이다.
 - 카드 번호 전체·유효기간·CVC는 받지도 저장하지도 않는다 (끝 4자리만).
-- 혜택 규칙이 있는 카드(SUPPORTED)는 그 상품으로, 없는 카드는 EXTERNAL_PRODUCT_ID로 결제수단 원장에 넣는다.
-  규칙이 없는 카드는 C가 추천·결제에서 빼고, 카드 목록에는 "혜택 규칙 없음"으로 보인다.
+- C에 카드 정보가 있는 카드(PRODUCTS)는 그 상품으로, 없는 카드는 EXTERNAL_PRODUCT_ID로 결제수단 원장에 넣는다.
+  카드 정보는 있어도 배달 즉시할인 규칙이 없는 카드(적립형 등)와 정보가 아예 없는 카드는
+  C가 추천·결제에서 빼고, 카드 목록에는 "혜택 규칙 없음"으로 보인다.
 """
 
 import uuid
@@ -18,30 +19,40 @@ from e_payment.db import now
 from e_payment.errors import AppError
 from e_payment.models import CardRegistration, MyDataConsent, Payment, PaymentMethod
 
-# C에 혜택 규칙이 있는 카드 (C의 products.CARD_PRODUCTS와 같은 상품 ID·이름)
-SUPPORTED = {
-    "PRD-CARD-A": "요기요 신한카드 체크",
-    "PRD-CARD-B": "신한카드 구독 좋아요",
-    "PRD-CARD-C": "신한카드 Deep On Platinum+",
+# C에 카드 정보가 있는 상품 (C의 products.CARD_PRODUCTS와 같은 상품 ID·이름). 값: (이름, 배달 즉시할인 규칙이 있는지)
+PRODUCTS = {
+    "PRD-CARD-A": ("요기요 신한카드 체크", True),
+    "PRD-CARD-B": ("신한카드 구독 좋아요", True),
+    "PRD-CARD-C": ("신한카드 Deep On Platinum+", True),
+    "PRD-CARD-D": ("KB국민 노리2 체크카드 (KB Pay)", True),
+    "PRD-CARD-E": ("현대카드 ZERO Up (포인트형)", False),  # 적립형이라 즉시할인 규칙이 없다 (혜택 정보만 보여 준다)
+    "PRD-CARD-F": ("요기요 삼성카드", True),
 }
-EXTERNAL_PRODUCT_ID = "PRD-EXT-CARD"  # 혜택 규칙이 없는 카드
+EXTERNAL_PRODUCT_ID = "PRD-EXT-CARD"  # 카드 정보도 혜택 규칙도 없는 카드
 
 CONSENT_SCOPES = ("CARD_LIST", "CARD_USAGE")
 CONSENT_MINUTES = 10
 
 # 모의 마이데이터가 돌려주는 카드 목록 (누구에게나 같다). monthly_performance_krw는 "이번 달 이용액" 대용.
+# 우리가 카드 정보를 모르는 카드는 직접 입력("그 밖의 카드")으로 넣을 수 있다.
 MYDATA_CARDS = [
-    {"card_id": "MD-CARD-001", "issuer": "신한카드", "name": SUPPORTED["PRD-CARD-A"], "last4": "5512",
+    {"card_id": "MD-CARD-001", "issuer": "신한카드", "name": PRODUCTS["PRD-CARD-A"][0], "last4": "5512",
      "product_id": "PRD-CARD-A", "monthly_performance_krw": 210000},
-    {"card_id": "MD-CARD-002", "issuer": "신한카드", "name": SUPPORTED["PRD-CARD-B"], "last4": "4821",
+    {"card_id": "MD-CARD-002", "issuer": "신한카드", "name": PRODUCTS["PRD-CARD-B"][0], "last4": "4821",
      "product_id": "PRD-CARD-B", "monthly_performance_krw": 430000},
-    {"card_id": "MD-CARD-003", "issuer": "신한카드", "name": SUPPORTED["PRD-CARD-C"], "last4": "7733",
+    {"card_id": "MD-CARD-003", "issuer": "신한카드", "name": PRODUCTS["PRD-CARD-C"][0], "last4": "7733",
      "product_id": "PRD-CARD-C", "monthly_performance_krw": 320000},
-    {"card_id": "MD-CARD-004", "issuer": "KB국민카드", "name": "KB국민 노리2 체크카드", "last4": "1209",
-     "product_id": None, "monthly_performance_krw": 85000},
-    {"card_id": "MD-CARD-005", "issuer": "현대카드", "name": "현대카드 ZERO", "last4": "3340",
-     "product_id": None, "monthly_performance_krw": 150000},
+    {"card_id": "MD-CARD-004", "issuer": "KB국민카드", "name": PRODUCTS["PRD-CARD-D"][0], "last4": "1209",
+     "product_id": "PRD-CARD-D", "monthly_performance_krw": 250000},
+    {"card_id": "MD-CARD-005", "issuer": "현대카드", "name": PRODUCTS["PRD-CARD-E"][0], "last4": "3340",
+     "product_id": "PRD-CARD-E", "monthly_performance_krw": 150000},
+    {"card_id": "MD-CARD-006", "issuer": "삼성카드", "name": PRODUCTS["PRD-CARD-F"][0], "last4": "6021",
+     "product_id": "PRD-CARD-F", "monthly_performance_krw": 420000},
 ]
+
+
+def has_benefit_rule(product_id: str | None) -> bool:
+    return product_id in PRODUCTS and PRODUCTS[product_id][1]
 
 
 def _iso(v):
@@ -49,8 +60,9 @@ def _iso(v):
 
 
 def catalog() -> dict:
-    """직접 입력 화면이 고를 수 있는 '혜택 규칙이 있는 카드' 목록."""
-    return {"supported": [{"product_id": k, "name": v} for k, v in SUPPORTED.items()], "mock": True}
+    """직접 입력 화면이 고를 수 있는 '카드 정보가 있는 카드' 목록. has_benefit_rule이 false면 혜택 정보만 보여 준다."""
+    return {"products": [{"product_id": k, "name": v[0], "has_benefit_rule": v[1]} for k, v in PRODUCTS.items()],
+            "mock": True}
 
 
 # ---------------------------------------------------------------- 모의 마이데이터
@@ -92,7 +104,9 @@ def list_mydata_cards(db: Session, user_id: str, consent_id: str) -> dict:
     products, refs = _held(db, user_id)
     results = [
         {"card_id": c["card_id"], "issuer": c["issuer"], "name": c["name"], "last4": c["last4"],
-         "supported": c["product_id"] is not None, "monthly_performance_krw": c["monthly_performance_krw"],
+         "has_card_info": c["product_id"] in PRODUCTS,  # 혜택 정보를 화면에 보여 줄 수 있는 카드
+         "has_benefit_rule": has_benefit_rule(c["product_id"]),  # 배달 즉시할인 추천·결제에 쓰이는 카드
+         "monthly_performance_krw": c["monthly_performance_krw"],
          "already_added": _already(c, products, refs)}
         for c in MYDATA_CARDS
     ]
@@ -121,22 +135,22 @@ def register_card(db: Session, body: dict, method_item) -> dict:
             raise AppError(404, "MYDATA_CARD_NOT_FOUND", "마이데이터에서 이 카드를 찾을 수 없어요.")
         product_id = card["product_id"] or EXTERNAL_PRODUCT_ID
         name, issuer, last4 = card["name"], card["issuer"], card["last4"]
-        if card["product_id"] is None:
+        if card["product_id"] is None:  # 정보를 모르는 카드는 끝 4자리를 이름에 붙여 구별한다
             name = f"{name} ({last4})"
         performance, ref = card["monthly_performance_krw"], f"mydata:{card['card_id']}"
     elif body.get("product_id"):
         product_id = body["product_id"]
-        if product_id not in SUPPORTED:
-            raise AppError(400, "VALIDATION_ERROR", "혜택 규칙이 있는 카드가 아니에요.",
+        if product_id not in PRODUCTS:
+            raise AppError(400, "VALIDATION_ERROR", "카드 정보가 있는 카드가 아니에요.",
                            {"fields": [{"loc": "body.product_id", "reason": "invalid_value"}]})
-        name, performance, ref = SUPPORTED[product_id], 0, f"product:{product_id}"
+        name, performance, ref = PRODUCTS[product_id][0], 0, f"product:{product_id}"
     else:
         product_id, performance = EXTERNAL_PRODUCT_ID, 0
         name = f"{body['name']} ({last4})" if last4 else body["name"]
         ref = f"manual:{body['name'].strip().lower()}:{last4 or ''}"
 
-    # 혜택 규칙이 있는 카드는 한 사람이 같은 상품을 한 장만 갖는다 (처음 넣어 둔 카드 포함)
-    if (product_id in SUPPORTED and product_id in products) or ref in refs:
+    # 카드 정보가 있는 카드는 한 사람이 같은 상품을 한 장만 갖는다 (처음 넣어 둔 카드 포함)
+    if (product_id in PRODUCTS and product_id in products) or ref in refs:
         raise AppError(409, "ALREADY_REGISTERED", "이미 내 결제수단에 있는 카드예요.")
 
     method = _new_method(user_id, product_id, name, performance)
@@ -151,7 +165,8 @@ def register_card(db: Session, body: dict, method_item) -> dict:
         db.rollback()
         raise AppError(409, "ALREADY_REGISTERED", "이미 내 결제수단에 있는 카드예요.") from None
     return {"payment_method": method_item(method),
-            "registration": {"source": source, "issuer": issuer, "last4": last4, "supported": product_id in SUPPORTED},
+            "registration": {"source": source, "issuer": issuer, "last4": last4,
+                             "has_benefit_rule": has_benefit_rule(product_id)},
             "mock": True}
 
 

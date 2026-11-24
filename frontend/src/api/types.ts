@@ -331,6 +331,7 @@ export interface CardDashboard {
   name: string;
   status: string;
   benefit_rule_version: string;
+  has_benefit_rule: boolean; // false면 혜택 정보만 보여 주는 카드 (추천·결제에는 쓰이지 않는다)
   product: {
     product_name: string | null;
     card_kind: string | null;
@@ -491,7 +492,8 @@ export interface MyCardList {
 }
 
 export interface CardCatalog {
-  supported: { product_id: string; name: string }[];
+  // 혜택 정보를 아는 카드. has_benefit_rule=false(적립형 등)면 정보만 보여 주고 추천·결제에는 쓰지 않는다
+  products: { product_id: string; name: string; has_benefit_rule: boolean }[];
 }
 
 export interface MyDataConsent {
@@ -505,7 +507,8 @@ export interface MyDataCard {
   issuer: string;
   name: string;
   last4: string;
-  supported: boolean; // 혜택 규칙이 있는 카드
+  has_card_info: boolean; // 혜택 정보를 아는 카드 (화면에 혜택을 보여 줄 수 있다)
+  has_benefit_rule: boolean; // 배달 즉시할인 규칙이 있는 카드 (추천·결제에 쓰인다)
   monthly_performance_krw: number;
   already_added: boolean;
 }

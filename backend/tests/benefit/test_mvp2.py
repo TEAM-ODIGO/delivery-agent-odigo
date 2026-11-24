@@ -43,7 +43,7 @@ def test_c08_매칭_결과가_추천에_반영된다(client, admin, svc):
     client.post("/benefit/local-currency/restaurants/sync", json=SYNC, headers=admin)
     d = client.post("/benefit/recommendations", json=REC, headers=svc).json()
     local = next(o for o in d["options"] if o["payment_method_id"] == "LOCAL001")
-    assert local["reasons"] == ["지역화폐 즉시할인 5%"]                     # 더 이상 '(추정)'이 아님
+    assert local["reasons"] == ["충전한 잔액에서 사용한 만큼 차감"]           # 더 이상 '(추정)'이 아님
     d = client.post("/benefit/recommendations", json={**REC, "restaurant_id": "STORE102"}, headers=svc).json()
     assert {"payment_method_id": "LOCAL001", "reason_codes": ["LOCAL_CURRENCY_UNVERIFIED"]} in d["excluded"]
 
@@ -114,7 +114,7 @@ def test_c10_초안은_DRAFT이고_계산에_쓰이지_않는다(client, admin, 
     assert d["llm"] == {"route": "LLM_API", "model": "fake"}
     rec = client.post("/benefit/recommendations", json=REC, headers=svc).json()
     assert rec["options"][0]["instant_discount_krw"] == 2000            # 기존 ACTIVE 규칙 그대로
-    assert client.get("/benefit/rules", headers=admin).json()["count"] == 4  # 카드 A·B·C + 지역화폐 규칙
+    assert client.get("/benefit/rules", headers=admin).json()["count"] == 6  # 카드 A·B·C·D(노리2)·F(요기요 삼성) + 지역화폐 규칙
 
 
 def test_c10_혜택을_못_찾으면_422(client, admin):
@@ -182,12 +182,12 @@ def test_c11_형식이_틀리면_400이고_버전은_그대로(client, admin):
 
 
 def test_c11_규칙을_비활성화하면_계산에서_빠진다(client, admin, svc):
-    body = {**ACTIVATE, "deactivate_rule_ids": ["RULE-LOCAL-A-DISCOUNT"]}
+    body = {**ACTIVATE, "deactivate_rule_ids": ["RULE-LOCAL-A-PREPAID"]}
     client.post("/benefit/rule-versions", json=body, headers=admin)
     r = client.post("/benefit/calculations", json={**CALC, "payment_method_id": "LOCAL001"}, headers=svc)
     assert r.status_code == 404 and r.json()["error"]["code"] == "RULE_NOT_FOUND"
     inactive = client.get("/benefit/rules?status=INACTIVE", headers=admin).json()
-    assert [x["rule_id"] for x in inactive["results"]] == ["RULE-LOCAL-A-DISCOUNT"]
+    assert [x["rule_id"] for x in inactive["results"]] == ["RULE-LOCAL-A-PREPAID"]
     unknown = client.post("/benefit/rule-versions", json={**ACTIVATE, "base_version": "BEN-V2",
                           "deactivate_rule_ids": ["NOPE"]}, headers=admin)
     assert unknown.status_code == 400
@@ -198,6 +198,6 @@ def test_c11_멱등키(client, admin):
     a = client.post("/benefit/rule-versions", json=ACTIVATE, headers=h).json()
     b = client.post("/benefit/rule-versions", json=ACTIVATE, headers=h).json()
     assert a == b and b["benefit_rule_version"] == "BEN-V2"                           # 새 버전이 또 만들어지지 않음
-    other = {**ACTIVATE, "deactivate_rule_ids": ["RULE-LOCAL-A-DISCOUNT"]}
+    other = {**ACTIVATE, "deactivate_rule_ids": ["RULE-LOCAL-A-PREPAID"]}
     r = client.post("/benefit/rule-versions", json=other, headers=h)
     assert r.status_code == 409 and r.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
