@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { YogiyoCartJob } from "../api/types";
 import { krw } from "../lib/format";
-import { Banner, Button, RobotLoader, Row, Tag } from "./ui";
+import { Banner, Button, Row, Tag } from "./ui";
 
 const ACTIVE = new Set(["QUEUED", "RUNNING"]);
 
@@ -34,6 +34,13 @@ export function cartBlockReason(job: YogiyoCartJob | undefined, starting = false
   if (job.status === "FAILED")
     return "요기요 장바구니 담기에 실패해서 결제할 수 없어요. 다시 담거나 주문을 취소해 주세요.";
   return null;
+}
+
+// 담는 동안 보여 줄 문구 (장바구니 카드와 승인 화면 전체 로딩이 같이 쓴다)
+export function cartWaitingText(job: YogiyoCartJob | undefined): string {
+  return job?.mode === "remote" && job.status === "QUEUED"
+    ? "요기요 담기 PC(작업기)가 가져가길 기다리는 중…"
+    : "요기요에서 담는 중… (5~20초)";
 }
 
 // 승인 화면에 들어오면 한 번 자동으로 담기를 시작한다 (아직 담은 적이 없을 때만)
@@ -88,13 +95,7 @@ export default function YogiyoCart({ requestId, requotedJobId }: { requestId: st
       </span>
 
       {(active || status === "NONE") && (
-        <RobotLoader
-          label={
-            data?.mode === "remote" && status === "QUEUED"
-              ? "요기요 담기 PC(작업기)가 가져가길 기다리는 중…"
-              : "요기요에서 담는 중… (5~20초)"
-          }
-        />
+        <span className="muted">{cartWaitingText(data)}</span>
       )}
 
       {data && !active && status !== "NONE" && (

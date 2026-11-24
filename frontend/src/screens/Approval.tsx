@@ -12,10 +12,10 @@ import {
   readCardTap,
   savePendingTap,
 } from "../lib/nfc";
-import { Banner, Button, Row, Screen, Tag } from "../components/ui";
+import { Banner, Button, RobotOverlay, Row, Screen, Tag } from "../components/ui";
 import { clock, krw, secondsLeft, unverifiedTexts } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import YogiyoCart, { cartBlockReason, useAutoStartCart, useYogiyoCart } from "../components/YogiyoCart";
+import YogiyoCart, { cartBlockReason, cartWaitingText, useAutoStartCart, useYogiyoCart } from "../components/YogiyoCart";
 import { useIsMutating } from "@tanstack/react-query";
 
 export default function Approval({ view, busy, send, back }: StepProps) {
@@ -103,6 +103,8 @@ export default function Approval({ view, busy, send, back }: StepProps) {
   }
 
   const waiting = tapping || waitingIphone;
+  // 요기요에서 담는 중이거나 요기요 금액으로 다시 계산하는 중이면 화면 전체에 로봇 로딩을 띄운다 (실패하면 내린다)
+  const cartLoading = (!!cartBlock && cart.data?.status !== "FAILED") || requoting;
 
   return (
     <Screen
@@ -136,6 +138,16 @@ export default function Approval({ view, busy, send, back }: StepProps) {
         </>
       }
     >
+      {cartLoading && (
+        <RobotOverlay label={requoting ? "요기요 금액으로 다시 계산 중…" : cartWaitingText(cart.data)}>
+          <span className="faint">요기요 장바구니에 같은 메뉴를 담아 금액을 맞추고 있어요</span>
+          {!requoting && (
+            <button className="link" onClick={back} disabled={busy}>
+              이전으로
+            </button>
+          )}
+        </RobotOverlay>
+      )}
       {over_budget && (
         <Banner tone="warn">
           예산 {krw(over_budget.limit_krw)}보다 {krw(over_budget.over_krw)} 많은 주문이에요. 앞에서 확인하신 대로
