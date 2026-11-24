@@ -47,7 +47,7 @@ const cuisineImage = (cuisine?: string | null) =>
   `/images/cuisine/${(cuisine && CUISINE_IMAGES[cuisine]) || "default"}.png`;
 const DEFAULT_SHOWN = 3; // 확인 결과가 오기 전에 보여 줄 후보 수 (예비 후보는 숨김)
 
-export default function Candidates({ view, busy, send, cancel, decline, back, again }: StepProps) {
+export default function Candidates({ view, busy, send, decline, back, again }: StepProps) {
   const prompt = view.prompt;
   const all = prompt?.type === "SELECT_CANDIDATE" ? prompt.candidates : [];
   const live = useLiveCheck(view.request_id);
@@ -149,7 +149,6 @@ export default function Candidates({ view, busy, send, cancel, decline, back, ag
     <Screen
       title="이런 곳은 어때요?"
       step={view.step}
-      back={busy ? undefined : back}
       footer={
         nothingOrderable ? (
           <Button onClick={decline} disabled={busy}>
@@ -157,8 +156,9 @@ export default function Candidates({ view, busy, send, cancel, decline, back, ag
           </Button>
         ) : (
           <>
-            <Button kind="secondary" onClick={cancel} disabled={busy}>
-              취소
+            {/* 이전 (이슈 #68): 취소 대신, 같은 문장이 채워진 입력 화면으로 돌아가 조건을 고친다 */}
+            <Button kind="secondary" onClick={back} disabled={busy}>
+              이전
             </Button>
             <Button disabled={!chosen || busy} onClick={choose}>
               {busy && action === "select" ? "주문안 만드는 중…" : "이 가게로"}

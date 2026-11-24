@@ -1,9 +1,10 @@
 // 주문 1건 진행 화면: O-03 상태(state)에 맞는 화면을 그리고, 사용자 응답은 O-02로 보낸다.
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { Reply, RunView } from "../api/types";
-import { Button, Screen, Spinner } from "../components/ui";
+import { Button, Modal, Screen, Spinner } from "../components/ui";
 import { TRANSIENT } from "../lib/format";
 import { useToast } from "../lib/hooks";
 import { recallMessage } from "../lib/lastMessage";
@@ -42,6 +43,9 @@ export default function RunPage() {
     },
   });
 
+  // 취소 확인 (이슈 #68): 브라우저 확인창(window.confirm)은 휴대폰 사파리에서 막히면 아무 반응이 없어 화면 안 팝업으로 묻는다
+  const [askCancel, setAskCancel] = useState(false);
+
   const reply = useMutation({
     mutationFn: (r: Reply) => api.reply(requestId, run.data!.state_version, r),
     onSuccess: (view) => qc.setQueryData(key, view),
@@ -78,9 +82,7 @@ export default function RunPage() {
     view,
     busy: reply.isPending,
     send: (r) => reply.mutate(r),
-    cancel: () => {
-      if (window.confirm("주문을 취소할까요?")) reply.mutate({ type: "CANCEL" });
-    },
+    cancel: () => setAskCancel(true),
     decline: () => reply.mutate({ type: "CANCEL" }, { onSuccess: () => nav("/") }),
     back: () =>
       reply.mutate(
@@ -95,6 +97,36 @@ export default function RunPage() {
       ),
   };
 
+  const cancelModal = askCancel && (
+    <Modal
+      label="주문 취소 확인"
+      actions={
+        <>
+          <Button kind="secondary" onClick={() => setAskCancel(false)} autoFocus>
+            아니오
+          </Button>
+          <Button
+            disabled={reply.isPending}
+            onClick={() => reply.mutate({ type: "CANCEL" }, { onSettled: () => setAskCancel(false) })}
+          >
+            취소할게요
+          </Button>
+        </>
+      }
+    >
+      <p style={{ margin: 0 }}>주문을 취소할까요?</p>
+    </Modal>
+  );
+
+  return (
+    <>
+      {renderStep(view, props)}
+      {cancelModal}
+    </>
+  );
+}
+
+function renderStep(view: RunView, props: StepProps) {
   switch (view.state) {
     case "NEED_CLARIFICATION":
       return <Clarify {...props} />;
