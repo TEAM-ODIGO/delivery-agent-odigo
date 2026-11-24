@@ -6,6 +6,7 @@ import type { Reply, RunView } from "../api/types";
 import { Button, Screen, Spinner } from "../components/ui";
 import { TRANSIENT } from "../lib/format";
 import { useToast } from "../lib/hooks";
+import { recallMessage } from "../lib/lastMessage";
 import Clarify from "../screens/Clarify";
 import Candidates from "../screens/Candidates";
 import PaymentSelect from "../screens/PaymentSelect";
@@ -18,6 +19,8 @@ export interface StepProps {
   send: (reply: Reply) => void;
   cancel: () => void; // 확인창을 거쳐 취소
   decline: () => void; // 사용자가 팝업에서 "아니오" → 확인창 없이 취소하고 처음 화면으로
+  back: () => void; // [이전] (이슈 #68): 이 주문을 취소하고 같은 문장이 채워진 입력 화면으로
+  again: () => void; // [다른 가게 추천] (이슈 #68): 지금까지 보여 준 가게를 빼고 다시 추천
 }
 
 export default function RunPage() {
@@ -79,6 +82,17 @@ export default function RunPage() {
       if (window.confirm("주문을 취소할까요?")) reply.mutate({ type: "CANCEL" });
     },
     decline: () => reply.mutate({ type: "CANCEL" }, { onSuccess: () => nav("/") }),
+    back: () =>
+      reply.mutate(
+        { type: "CANCEL" },
+        { onSuccess: () => nav("/", { state: { message: recallMessage(requestId) } }) },
+      ),
+    again: () =>
+      reply.mutate(
+        { type: "RECOMMEND_AGAIN" },
+        // 새 후보로 요기요 확인을 다시 시작했으니 확인 결과도 새로 받는다
+        { onSuccess: () => qc.invalidateQueries({ queryKey: ["live-check", requestId] }) },
+      ),
   };
 
   switch (view.state) {
