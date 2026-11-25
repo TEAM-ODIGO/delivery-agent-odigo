@@ -87,7 +87,7 @@ def test_asks_a_for_top_n_candidates(env, monkeypatch):
     live = _live(env)
     env.svc = functools.partial(type(env).svc, env, live_check=live)
     env.flow("CANDIDATES_READY")
-    assert seen[-1]["top_n"] == 6
+    assert seen[-1]["top_n"] == 9  # LIVE_CHECK_TOP_N 기본값 (이슈 #109: 6 → 9)
 
 
 def test_closed_candidate_is_hidden_and_cannot_be_selected(env, live):

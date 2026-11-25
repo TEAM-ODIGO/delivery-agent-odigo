@@ -7,8 +7,8 @@
 
 설정 (.env)
 - LIVE_CHECK_MODE             : fake(기본, 요기요 접속 없이 시연) | real | remote(한국 PC 작업기, #80) | off(확인 안 함)
-- LIVE_CHECK_TOP_N=6          : A-05에서 받는 후보 수
-- LIVE_CHECK_WANT=3           : 통과(OK·CHANGED)가 이만큼이면 나머지는 확인하지 않음
+- LIVE_CHECK_TOP_N=9          : A-05에서 받는 후보 수 (예비 후보 포함)
+- LIVE_CHECK_WANT=5           : 통과(OK·CHANGED)가 이만큼이면 나머지는 확인하지 않음 (= 화면에 보일 후보 수, 이슈 #109)
 - LIVE_CHECK_CONCURRENCY=3    : 동시에 여는 탭 수
 - LIVE_CHECK_TIMEOUT_SECONDS=8: 식당 하나에서 메뉴를 기다리는 시간
 - LIVE_CHECK_CACHE_MINUTES=15 : real·remote 모드에서 이 시간 안에 확인한 식당은 다시 열지 않음
@@ -69,8 +69,8 @@ def _num(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class LiveCheckSettings:
     mode: str = field(default_factory=lambda: _env("LIVE_CHECK_MODE", "fake").lower())
-    top_n: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_TOP_N", 6))))
-    want: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_WANT", 3))))
+    top_n: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_TOP_N", 9))))
+    want: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_WANT", 5))))
     concurrency: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_CONCURRENCY", 3))))
     timeout_seconds: float = field(default_factory=lambda: _num("LIVE_CHECK_TIMEOUT_SECONDS", 8))
     cache_minutes: float = field(default_factory=lambda: _num("LIVE_CHECK_CACHE_MINUTES", 15))

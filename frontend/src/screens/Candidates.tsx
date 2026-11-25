@@ -10,7 +10,7 @@
 //   목록을 아래로 당겼다 놓으면(당겨서 새로고침) 지금까지 보여 준 가게를 빼고 다음 순위 가게로 바꾼다. 더 없으면 안내(토스트)만 하고 그대로 둔다.
 // 요기요 실시간 확인(O-15): 화면은 기다리지 않고 뜨고, 결과가 오는 대로 진행 바와 배지가 바뀐다.
 //   주문 불가로 확인된 후보는 숨기지 않고 제자리에 사유와 함께 비활성으로 보인다(selectable=false).
-//   고를 수 있는 후보가 3곳 되도록 다음 순번 후보가 아래에 나온다(visible).
+//   고를 수 있는 후보가 5곳 되도록 다음 순번 후보가 아래에 나온다(visible, 이슈 #109: 3 → 5곳).
 import { useEffect, useState } from "react";
 import type { StepProps } from "../pages/RunPage";
 import type { Candidate, LiveResult } from "../api/types";
@@ -24,7 +24,7 @@ import { cuisineImage } from "../lib/images";
 const isOver = (c: Candidate) => c.violations.some((v) => v.code === "BUDGET_EXCEEDED");
 const MIN_ORDER_TEXT = "최소주문금액이 맞지 않아서 주문이 불가합니다";
 
-const DEFAULT_SHOWN = 3; // 확인 결과가 오기 전에 보여 줄 후보 수 (예비 후보는 숨김)
+const DEFAULT_SHOWN = 5; // 확인 결과가 오기 전에 보여 줄 후보 수 (예비 후보는 숨김, 백엔드 LIVE_CHECK_WANT와 같게)
 
 export default function Candidates({ view, busy, send, decline, back, again }: StepProps) {
   const prompt = view.prompt;
@@ -35,7 +35,7 @@ export default function Candidates({ view, busy, send, decline, back, again }: S
   // 요기요 실시간 확인이 끝나야 고를 수 있다 (이슈 #85). 확인 못 함으로 끝나도 고를 수 있고, 꺼져 있으면(OFF) 바로 고른다
   const liveChecking = (!live.data && !live.isError) || live.data?.state === "RUNNING";
   const liveOf = (c: Candidate): LiveResult | undefined => lc?.results.find((r) => r.candidate_index === c.index);
-  // 보일 후보: 확인 결과가 있으면 그 visible대로, 없으면 앞에서 3곳 (확인이 꺼져 있으면 전부)
+  // 보일 후보: 확인 결과가 있으면 그 visible대로, 없으면 앞에서 5곳 (확인이 꺼져 있으면 전부)
   const list = lc
     ? all.filter((c) => liveOf(c)?.visible ?? true)
     : live.data?.state === "OFF"
