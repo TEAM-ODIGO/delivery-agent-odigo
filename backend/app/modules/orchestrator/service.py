@@ -52,6 +52,7 @@ from app.modules.orchestrator.constants import (
     STEPS,
     TOTAL_STEPS,
     WAITING,
+    YOGIYO_STORE_URL,
     FailCode,
     ReplyType,
     RunEventType,
@@ -130,7 +131,7 @@ class OrchestratorService:
             state=RunState.RECEIVED,
             state_version=0,
             message=body.message,
-            delegation=body.delegation.model_dump(mode="json"),
+            delegation=self._with_search(body.delegation.model_dump(mode="json")),
             context={},
             event_seq=0,
             created_at=now,
@@ -599,6 +600,29 @@ class OrchestratorService:
         rid = run.request_id
         self._check_live(run, cand)
 
+        # '주문안 만들기'를 맡기지 않았으면 추천까지만: 고른 가게를 기록하고 요기요로 넘긴다 (이슈 #111)
+        if not self._allows(run, "BUILD_ORDER"):
+            sel = self._call(run, "A", "A-06", lambda: self.a.select(rid, {"candidate_id": cid}))
+            chosen = sel.get("selected_candidate") or cand
+            self._set_ctx(run, selected_candidate=chosen)
+            restaurant = chosen.get("restaurant") or cand["restaurant"]
+            self._to(
+                run,
+                RunState.RECOMMENDED,
+                prompt=None,
+                result={
+                    "recommendation": {
+                        "restaurant_id": restaurant["restaurant_id"],
+                        "restaurant_name": restaurant.get("name") or cand.get("restaurant_name"),
+                        "items": self._item_views(chosen.get("items") or cand.get("items") or []),
+                        "estimated_total_krw": chosen.get("estimated_total_krw") or cand.get("estimated_total_krw"),
+                        "yogiyo_url": YOGIYO_STORE_URL.format(restaurant_id=restaurant["restaurant_id"]),
+                    }
+                },
+                detail={"reason": "BUILD_ORDER_NOT_DELEGATED"},
+            )
+            return
+
         # 예산 초과 확인(로컬 확장): 사용자가 동의했고 A가 이 후보를 예산 초과로
         # 표시했을 때만 기록한다. 동의는 선택할 때마다 새로 정한다
         # (이전 후보에 대한 동의가 다음 후보로 넘어가지 않게).
@@ -904,6 +928,20 @@ class OrchestratorService:
     def _on_approve(self, run: Run, p: dict) -> None:
         ctx = run.context
         rid = run.request_id
+        # '결제 요청'을 맡기지 않았으면 결제하지 않고 주문안을 넘긴다 (이슈 #111). 사용자가 요기요에서 직접 결제
+        if not self._allows(run, "REQUEST_PAYMENT"):
+            restaurant_id = (ctx.get("selected_candidate") or {}).get("restaurant", {}).get("restaurant_id")
+            self._to(
+                run,
+                RunState.HANDED_OFF,
+                prompt=None,
+                result={
+                    "order": self._order_view(run),
+                    "yogiyo_url": YOGIYO_STORE_URL.format(restaurant_id=restaurant_id) if restaurant_id else None,
+                },
+                detail={"reason": "REQUEST_PAYMENT_NOT_DELEGATED"},
+            )
+            return
         if p.get("card_tap") and not ctx.get("execution_id"):
             self._check_card_tap(run, p["card_tap"])  # 다른 카드면 여기서 멈춘다 (결제 시작 전)
         if not ctx.get("execution_id"):
@@ -2127,6 +2165,20 @@ class OrchestratorService:
         }
 
     @staticmethod
+    def _with_search(delegation: dict) -> dict:
+        """가게 찾기는 ODIGO의 기본 일이라 항상 맡긴 것으로 본다 (이슈 #111)."""
+        actions = list(delegation.get("allowed_actions") or [])
+        if "SEARCH" not in actions:
+            actions.insert(0, "SEARCH")
+        return {**delegation, "allowed_actions": actions}
+
+    @staticmethod
+    def _allows(run: Run, action: str) -> bool:
+        """이 주문에서 ODIGO에게 그 일을 맡겼는지 (주문을 시작할 때의 설정 기준)."""
+        actions = (run.delegation or {}).get("allowed_actions")
+        return True if actions is None else action in actions
+
+    @staticmethod
     def _item_views(items: list[dict]) -> list[dict]:
         return [
             {
@@ -2230,6 +2282,8 @@ class OrchestratorService:
             "result": run.result,
             "blocked": run.blocked,
             "error": run.error,
+            # 맡긴 일 (이슈 #111): 화면이 버튼을 '요기요에서 보기'·'요기요에서 직접 결제하기'로 바꾼다
+            "allowed_actions": (run.delegation or {}).get("allowed_actions"),
         }
         if run.notice:
             view["notice"] = run.notice
