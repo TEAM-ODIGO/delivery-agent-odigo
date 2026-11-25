@@ -89,7 +89,7 @@ export default function YogiyoCart({ requestId, requotedJobId }: { requestId: st
         {tag && <Tag tone={tag.tone}>{tag.text}</Tag>}
       </div>
       <span className="muted">
-        같은 메뉴를 요기요 장바구니에 담아 금액을 맞춰 봐요. 요기요에서 주문·결제는 하지 않아요.
+        같은 메뉴를 요기요 장바구니에 담아 금액을 맞춰 봐요.
       </span>
 
       {(active || status === "NONE") && (
@@ -126,7 +126,6 @@ export default function YogiyoCart({ requestId, requotedJobId }: { requestId: st
               style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)" }}
             />
           )}
-          {data.mode === "fake" && <span className="faint">시연 모드(fake): 실제 요기요에 접속하지 않았어요.</span>}
         </>
       )}
 

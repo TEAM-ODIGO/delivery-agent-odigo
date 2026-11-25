@@ -181,10 +181,6 @@ textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
 .robot-loader .link { margin-top: 12px; color: #fff; font-size: 16px; font-weight: 600; text-decoration: underline; }
 .link { background: none; border: 0; color: var(--pri); font-size: 13.5px; padding: 0; }
 .nav-link { color: var(--pri); text-decoration: none; font-size: 14px; font-weight: 600; }
-.demo details { font-size: 13px; color: var(--sub); }
-.demo summary { cursor: pointer; padding: 4px 0; }
-.demo .chips { margin-top: 8px; }
-.demo .chip { height: 30px; font-size: 12.5px; }
 .empty { text-align: center; color: var(--sub); padding: 48px 0; font-size: 14px; }
 .user-switch { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--sub); }
 .user-switch select { border: 1px solid #c9cdd3; border-radius: 8px; padding: 4px 8px; background: #fff; }
@@ -380,7 +376,14 @@ table.data tr.row-bad td { background: var(--bad-soft); }
 .drawer-close { border: 0; background: none; font-size: 24px; line-height: 1; color: #fff; }
 .drawer-item { border: 0; background: none; text-align: left; padding: 16px 20px; font-size: 15.5px; display: flex; justify-content: space-between; border-bottom: 1px solid #f2f2f2; }
 .drawer-item:hover { background: #fafbff; }
-.limit-line { border: 0; background: none; padding: 0; text-align: left; color: var(--sub); font-size: 13.5px; }
+/* 메뉴 맨 아래: 테스트 시나리오 · 체험 서비스 안내 (이슈 #101) */
+.drawer-foot { margin-top: auto; padding: 12px 20px 20px; border-top: 1px solid #f2f2f2; display: flex; flex-direction: column; gap: 10px; }
+.drawer-test { border: 0; background: none; padding: 4px 0; text-align: left; font-size: 13px; color: var(--sub); display: flex; justify-content: space-between; }
+.drawer-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.drawer-tags .chip { height: 30px; font-size: 12.5px; }
+.drawer-note { margin: 0; font-size: 11.5px; color: var(--faint); line-height: 1.5; }
+/* 첫 화면 'ODIGO에게 맡긴 일' 요약 (이슈 #101) */
+.delegation-summary { text-align: left; gap: 8px; }
 
 /* 설정 화면: 결제수단 줄 오른쪽 끝 ⋮ (카드 혜택 모달 열기) */
 .pm-more { margin-left: auto; flex: none; width: 36px; height: 36px; border: 0; border-radius: 18px; background: none; color: var(--sub); display: grid; place-items: center; }
@@ -472,3 +475,27 @@ table.data tr.row-bad td { background: var(--bad-soft); }
   .splash-path, .splash-runner, .splash-char, .splash-title, .splash-sub, .splash-dots, .splash-dots i { animation: none; opacity: 1; }
   .splash-path { width: 84%; }
 }
+
+/* 첫 화면 배달 주소 줄 (이슈 #101) */
+.addr-bar { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius); background: var(--pri-soft); border: 1px solid #dfe5ff; }
+.addr-pin { flex: none; width: 36px; height: 36px; border-radius: 50%; background: #fff; color: var(--pri); display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(59, 91, 219, 0.18); }
+.addr-text { display: flex; flex-direction: column; min-width: 0; }
+.addr-label { font-size: 11.5px; font-weight: 700; color: var(--pri); }
+.addr-text b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr-sub { font-size: 12.5px; color: var(--sub); }
+
+/* 첫 화면 예시: 음식 사진 칩, 2줄 + 가로로 넘기기 (이슈 #101) */
+.example-rail { overflow-x: auto; margin: 0 -20px; padding: 2px 20px 4px; scrollbar-width: none; scroll-snap-type: x proximity; scroll-padding: 0 20px; }
+.example-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto); gap: 6px; width: max-content; }
+.example-rail::-webkit-scrollbar { display: none; }
+.example-chip { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px 0 4px; white-space: nowrap; scroll-snap-align: start; }
+.example-chip img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+/* 'ODIGO에게 맡긴 일' 단계 흐름 (이슈 #101) */
+.delegation-flow { display: flex; align-items: flex-start; gap: 4px; padding: 2px 0; }
+.flow-step { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--faint); min-width: 64px; }
+.flow-step svg { width: 38px; height: 38px; padding: 9px; border-radius: 50%; background: var(--soft); }
+.flow-step em { font-style: normal; font-weight: 700; }
+.flow-step.on { color: var(--pri); }
+.flow-step.on svg { background: var(--pri-soft); }
+.flow-line { flex: 1; height: 2px; margin-top: 18px; background: #e5e7eb; }
+.flow-line.on { background: var(--pri); }

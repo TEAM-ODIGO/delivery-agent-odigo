@@ -143,7 +143,7 @@ class _ScenarioOrdering:
                     {
                         "code": "MENU_SOLD_OUT",
                         "menu_id": it.get("menu_id"),
-                        "message": "품절 (#시연)",
+                        "message": "품절",
                     }
                     for it in body.get("items", [])
                 ],

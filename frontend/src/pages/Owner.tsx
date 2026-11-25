@@ -14,7 +14,7 @@ const STEPS: { key: keyof OwnerFunnel; label: string; hint: string }[] = [
   { key: "candidates", label: "추천 후보", hint: "조건에 맞아 후보로 뽑힌 횟수" },
   { key: "shown", label: "고객 화면에 보임", hint: "후보 화면에 실제로 보인 횟수" },
   { key: "selected", label: "고객이 선택", hint: "고객이 이 가게를 고른 횟수" },
-  { key: "completed", label: "주문 완료", hint: "결제까지 끝난 횟수 (시연은 모의 결제)" },
+  { key: "completed", label: "주문 완료", hint: "결제까지 끝난 횟수" },
 ];
 
 export default function Owner() {
@@ -191,7 +191,6 @@ function Report({ d }: { d: OwnerDashboard }) {
         <div className="title-row">
           <b className="detail-title">{r.name}</b>
           {r.category && <Tag>{r.category}</Tag>}
-          {d.demo_data && <Tag tone="warn">시연 데이터 포함</Tag>}
         </div>
         <p className="faint small" style={{ margin: 0 }}>
           ★ {r.rating.toFixed(1)} (리뷰 {r.review_count.toLocaleString()}) · 최소주문 {krw(r.min_order_krw)} · 배달팁{" "}

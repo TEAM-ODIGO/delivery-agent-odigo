@@ -377,7 +377,8 @@ class CartService:
         if limit <= 0 or waited < limit:
             return False
         r = self.filler(_order(job), name=job.job_id, message="")
-        r.error = f"{why} 시연 모드(fake)로 대신 담았어요."
+        # 고객 화면에는 사용자용 문구만, 자세한 사정(작업기 응답 없음·가짜 마무리)은 로그와 운영 기록(mode=fake)으로
+        r.error = "요기요 확인이 늦어져 견적 금액 기준으로 마무리했어요."
         if self._finish(job.job_id, job.status, r, mode="fake"):
             log.warning("요기요 담기 작업 %s: %s 가짜로 마무리", job.job_id, why)
         return True
