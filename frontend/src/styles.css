@@ -499,3 +499,12 @@ table.data tr.row-bad td { background: var(--bad-soft); }
 .flow-step.on svg { background: var(--pri-soft); }
 .flow-line { flex: 1; height: 2px; margin-top: 18px; background: #e5e7eb; }
 .flow-line.on { background: var(--pri); }
+
+/* 추천 카드: 담긴 메뉴 한 줄 요약, 고른 카드만 펼침 (이슈 #105) */
+.menu-summary { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.menu-chev { margin-left: 4px; color: var(--pri); font-size: 11px; }
+.menu-items { list-style: none; margin: 4px 0 0; padding: 8px 12px; border-radius: 10px; background: #f6f7fb; display: flex; flex-direction: column; gap: 5px; animation: menu-open 0.2s ease-out; }
+.menu-items li { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; }
+.menu-items li b { white-space: nowrap; }
+@keyframes menu-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .menu-items { animation: none; } }

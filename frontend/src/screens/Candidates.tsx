@@ -300,6 +300,7 @@ function CandidateCard({
   const minOrderBlocked = c.orderable === false;
   const liveBlocked = live?.selectable === false;
   const blocked = minOrderBlocked || liveBlocked;
+  const open = selected && !blocked && c.items.length > 0;
   const minOrderText = c.violations.find((v) => v.code === "MIN_ORDER_NOT_MET")?.message ?? MIN_ORDER_TEXT;
   // 비슷한 메뉴로 고른 이유 ("'마라탕' 대신 비슷한 '짬뽕'을 담았어요 …")
   const similarReason = c.match ? c.reasons.find((r) => r.includes("대신") || r.includes("비슷한 가게")) : undefined;
@@ -313,6 +314,7 @@ function CandidateCard({
       className={`card has-deco${selected && !blocked ? " selected" : ""}`}
       onClick={onClick}
       aria-pressed={blocked ? undefined : selected}
+      aria-expanded={blocked ? undefined : open}
       disabled={blocked}
     >
       <div className="title-row">
@@ -320,8 +322,14 @@ function CandidateCard({
         <span className="price">{krw(c.total_krw)}</span>
       </div>
       {meta.length > 0 && <span className="muted">{meta.join(" · ")}</span>}
-      <span className="small">
-        {c.items.map((i) => `${i.name} ${i.quantity}${i.unit_price_krw !== null ? ` × ${krw(i.unit_price_krw)}` : ""}`).join(", ")}
+      {/* 담긴 메뉴는 한 줄로 요약하고, 고른 카드만 아래에 펼쳐 보여 준다 (이슈 #105) */}
+      <span className="menu-summary">
+        {menuSummary(c)}
+        {!blocked && c.items.length > 0 && (
+          <span className="menu-chev" aria-hidden="true">
+            {open ? "▴" : "▾"}
+          </span>
+        )}
       </span>
       <div className="tags">
         {liveBlocked ? null : minOrderBlocked ? (
@@ -359,6 +367,26 @@ function CandidateCard({
         c.reasons[0] && <span className="muted small">{c.reasons[0]}</span>
       )}
       {similarReason && <span className="small warn-text">{similarReason}</span>}
+      {open && (
+        <ul className="menu-items" aria-label={`${c.restaurant_name} 담긴 메뉴`}>
+          {c.items.map((i) => (
+            <li key={`${i.name}-${i.quantity}`}>
+              <span>
+                {i.name} × {i.quantity}
+              </span>
+              <b>{i.unit_price_krw !== null ? krw(i.unit_price_krw * i.quantity) : "—"}</b>
+            </li>
+          ))}
+        </ul>
+      )}
     </button>
   );
+}
+
+// "짜장면 외 1개 · 3개": 첫 메뉴 이름, 나머지 메뉴 수, 전체 수량
+function menuSummary(c: Candidate): string {
+  if (c.items.length === 0) return "담긴 메뉴 없음";
+  const total = c.items.reduce((n, i) => n + i.quantity, 0);
+  const rest = c.items.length - 1;
+  return `${c.items[0].name}${rest > 0 ? ` 외 ${rest}개` : ""} · ${total}개`;
 }
