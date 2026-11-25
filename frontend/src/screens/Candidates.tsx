@@ -15,8 +15,8 @@ import { useEffect, useState } from "react";
 import type { StepProps } from "../pages/RunPage";
 import type { Candidate, LiveResult } from "../api/types";
 import { api } from "../api/client";
-import { LiveBadge, LiveCheckBar, LiveCheckNote, useLiveCheck, useRecheckLive } from "../components/LiveCheck";
-import { Banner, Button, Modal, Screen, Tag } from "../components/ui";
+import { LiveBadge, LiveCheckBar, LiveCheckNote, liveCheckText, useLiveCheck, useRecheckLive } from "../components/LiveCheck";
+import { Banner, Button, Modal, RobotOverlay, Screen, Tag } from "../components/ui";
 import { krw } from "../lib/format";
 import { usePullToRefresh } from "../lib/usePullToRefresh";
 import { cuisineImage } from "../lib/images";
@@ -158,6 +158,14 @@ export default function Candidates({ view, busy, send, decline, back, again }: S
         )
       }
     >
+      {/* 요기요 실시간 확인 중에는 화면이 멈춘 것처럼 보이지 않게 UFO 로봇 로딩을 화면 전체에 띄운다 (끝나면 내린다) */}
+      {liveChecking && (
+        <RobotOverlay src="/images/odigo-ufo-loading.webp" label={liveCheckText(lc)}>
+          <button className="link" onClick={back} disabled={busy}>
+            이전으로
+          </button>
+        </RobotOverlay>
+      )}
       {view.notice && <Banner tone="warn">{view.notice.message}</Banner>}
       {recommendOnly && (
         <Banner tone="pri">주문안 만들기는 맡기지 않아서 추천까지만 해 드려요. 가게를 정하면 요기요에서 직접 주문할 수 있게 넘겨 드려요.</Banner>
