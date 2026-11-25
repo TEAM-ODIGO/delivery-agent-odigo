@@ -16,7 +16,7 @@ def fake_fill(order: CartOrder, *, message: str = "", **_: object) -> CartResult
         return CartResult(
             status="FAILED",
             restaurant_id=order.restaurant_id,
-            error="TimeoutError: 식당 페이지를 열지 못함 (#요기요실패 시연)",
+            error="TimeoutError: 식당 페이지를 열지 못함",
         )
     items = [
         {

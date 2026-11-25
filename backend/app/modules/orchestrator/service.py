@@ -431,8 +431,8 @@ class OrchestratorService:
     def _my_cards_port(self, name: str) -> Callable[..., dict]:
         fn = getattr(self.e, name, None)
         if fn is None:
-            raise AppError(503, "MY_CARDS_UNAVAILABLE",
-                           "카드 추가는 모의결제 서버(E)를 연결해야 쓸 수 있어요. (.env의 E_PAYMENT_URL·E_BASE_URL)")
+            # 개발 참고: 결제 서버(E)를 연결해야 쓸 수 있다 (.env의 E_PAYMENT_URL·E_BASE_URL)
+            raise AppError(503, "MY_CARDS_UNAVAILABLE", "지금은 카드를 추가할 수 없어요. 잠시 후 다시 시도해 주세요.")
         return fn
 
     def _card_port(self, name: str) -> Callable[..., dict]:

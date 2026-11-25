@@ -1,5 +1,5 @@
 // 첫 접속 스플래시 (이슈 #96): 파란 배경에 ODIGO 로봇(배달 봉투를 든 그림)이 점선 길을 따라 달려 들어오고,
-// "ODIGO · 카드 한 번이면 주문 끝"과 로딩 점이 나온 뒤 사라진다.
+// "ODIGO · 말 한마디면 주문부터 결제까지"와 로딩 점이 나온 뒤 사라진다.
 // - 한 탭(세션)에 한 번만. 화면을 누르면 바로 넘어간다.
 // - /tap(NFC 결제)처럼 링크로 바로 들어오는 화면에서는 띄우지 않는다 (App에서 고객 화면에만 붙인다).
 // - 움직임 줄이기 설정이면 애니메이션 없이 짧게 보여 준다.
@@ -59,7 +59,7 @@ export default function Splash() {
         </span>
       </div>
       <h1 className="splash-title">ODIGO</h1>
-      <p className="splash-sub">카드 한 번이면 주문 끝</p>
+      <p className="splash-sub">말 한마디면 주문부터 결제까지</p>
       <span className="splash-dots" aria-label="불러오는 중">
         <i />
         <i />

@@ -128,7 +128,7 @@ export const FAIL_SHORT: Record<string, string> = {
   DEPENDENCY_UNAVAILABLE: "서비스 장애",
   REQUEST_REJECTED: "결제 요청 거절",
   CANDIDATE_UNAVAILABLE: "요기요 주문 불가",
-  MOCK_DECLINED: "모의 결제 거절",
+  MOCK_DECLINED: "결제 거절",
 };
 export const reasonText = (code: string) => BLOCK_REASON[code] ?? FAIL_SHORT[code] ?? EXCLUDE_REASON[code] ?? code;
 

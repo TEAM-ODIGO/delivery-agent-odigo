@@ -127,7 +127,7 @@ def test_falls_back_to_fake_when_no_worker(env, session_factory, clock, tmp_path
     clock.advance(seconds=31)
     got = c.get(_url(v), headers=USER).json()
     assert (got["status"], got["mode"]) == ("CART_READY", "fake")
-    assert "가져가지 않아" in got["error"]
+    assert got["error"] == "요기요 확인이 늦어져 견적 금액 기준으로 마무리했어요."  # 고객용 문구 (#101)
     assert c.post(CLAIM, json={}).status_code == 204  # 마무리된 작업은 가져가지 않는다
 
 
@@ -139,7 +139,7 @@ def test_late_result_after_timeout_is_rejected(env, session_factory, clock, tmp_
     clock.advance(seconds=181)
     got = c.get(_url(v), headers=USER).json()
     assert (got["status"], got["mode"]) == ("CART_READY", "fake")
-    assert "결과를 보내지 않아" in got["error"]
+    assert got["error"] == "요기요 확인이 늦어져 견적 금액 기준으로 마무리했어요."
 
     r = c.post(f"/orchestrator/cart-worker/jobs/{job['job_id']}/result", json=_result(job))
     assert r.status_code == 409

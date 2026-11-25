@@ -25,7 +25,7 @@ export function Done({ view }: StepProps) {
   return (
     <Screen
       title="결제 완료"
-      step={{ ...view.step, label: `${view.step.label} (모의결제)` }}
+      step={view.step}
       footer={
         <>
           <Button kind="secondary" onClick={() => nav("/orders")}>
@@ -53,7 +53,6 @@ export function Done({ view }: StepProps) {
         <Row label="상태" value={<Tag tone="ok">{r.payment_status}</Tag>} />
       </div>
       <YogiyoCart requestId={view.request_id} />
-      <p className="center faint">실제 요기요 주문·결제는 하지 않아요 (E 모의결제).</p>
     </Screen>
   );
 }

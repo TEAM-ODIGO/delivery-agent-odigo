@@ -139,7 +139,7 @@ function CardList({ onAdd, onChanged }: { onAdd: () => void; onChanged: () => vo
         <Banner tone="warn">혜택 규칙이 없는 카드는 목록에는 보이지만, 추천과 결제에는 쓰이지 않아요.</Banner>
       )}
       {!canAdd && (
-        <Banner tone="warn">카드 추가는 모의결제 서버(E)를 연결해야 쓸 수 있어요.</Banner>
+        <Banner tone="warn">지금은 카드를 추가할 수 없어요. 잠시 후 다시 시도해 주세요.</Banner>
       )}
       <Button disabled={!canAdd} onClick={onAdd}>
         + 카드 추가
@@ -205,7 +205,7 @@ function Choose({ onPick }: { onPick: (v: View) => void }) {
     <>
       <button className="card mc-choice" onClick={() => onPick({ name: "consent" })}>
         <b>마이데이터로 불러오기</b>
-        <span className="muted">동의하면 가진 카드 목록을 불러와서 골라 넣어요. (시연용 모의 마이데이터)</span>
+        <span className="muted">동의하면 가진 카드 목록을 불러와서 골라 넣어요.</span>
       </button>
       <button className="card mc-choice" onClick={() => onPick({ name: "manual" })}>
         <b>직접 입력</b>
@@ -226,9 +226,6 @@ function Consent({ onConsented }: { onConsented: (consentId: string) => void }) 
   });
   return (
     <>
-      <Banner tone="pri">
-        진짜 마이데이터가 아니에요. 실제 카드사 정보는 가져오지 않고, 시연용으로 만든 카드 목록을 보여 줘요.
-      </Banner>
       <div className="card soft">
         <b>가져올 정보</b>
         <ul className="mc-list">

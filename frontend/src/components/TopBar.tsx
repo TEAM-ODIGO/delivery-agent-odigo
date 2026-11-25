@@ -2,6 +2,9 @@
 // 고객이 주문할 때 알 필요 없는 설정(결제 한도·자동 주문 범위)은 메뉴 안에 둔다.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client";
+import { DEMO_TAGS } from "../lib/format";
 
 // 새 주문(처음 화면)은 상단 바의 로고·ODIGO를 누르면 간다
 const MENU = [
@@ -12,7 +15,10 @@ const MENU = [
 
 export default function TopBar() {
   const [open, setOpen] = useState(false);
+  const [testOpen, setTestOpen] = useState(false);
   const nav = useNavigate();
+  // 테스트 시나리오(#품절 등)는 이 서버 구성에서 동작할 때만 메뉴 맨 아래에 보인다 (이슈 #101)
+  const demoTags = useQuery({ queryKey: ["demo-tags"], queryFn: api.demoTags, staleTime: 60_000 });
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
@@ -55,6 +61,32 @@ export default function TopBar() {
                 {m.label} <span className="faint">›</span>
               </button>
             ))}
+            <div className="drawer-foot">
+              {demoTags.data?.available && (
+                <>
+                  <button className="drawer-test" onClick={() => setTestOpen((v) => !v)} aria-expanded={testOpen}>
+                    테스트 시나리오 <span>{testOpen ? "−" : "+"}</span>
+                  </button>
+                  {testOpen && (
+                    <div className="drawer-tags">
+                      {DEMO_TAGS.map((t) => (
+                        <button
+                          key={t.tag}
+                          className="chip"
+                          onClick={() => {
+                            setOpen(false);
+                            nav("/", { state: { appendTag: t.tag } });
+                          }}
+                        >
+                          {t.tag} <span className="faint">&nbsp;{t.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              <p className="drawer-note">실제 주문·결제는 이루어지지 않는 체험 서비스예요.</p>
+            </div>
           </nav>
         </div>
       )}
