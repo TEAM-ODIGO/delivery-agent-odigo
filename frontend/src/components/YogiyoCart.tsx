@@ -114,7 +114,7 @@ export default function YogiyoCart({ requestId, requotedJobId }: { requestId: st
             />
           )}
           {applied ? (
-            <Banner tone="pri">요기요 금액으로 견적을 다시 계산했어요. 위의 내실 금액이 요기요 기준이에요.</Banner>
+            <Banner tone="pri">위의 내실 금액이 요기요 기준이에요.</Banner>
           ) : (
             data.mismatches?.map((m) => <Banner key={m}>{m}</Banner>)
           )}

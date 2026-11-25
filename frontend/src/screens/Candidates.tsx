@@ -28,6 +28,8 @@ const DEFAULT_SHOWN = 5; // 확인 결과가 오기 전에 보여 줄 후보 수
 
 export default function Candidates({ view, busy, send, decline, back, again }: StepProps) {
   const prompt = view.prompt;
+  // 주문안 만들기를 맡기지 않았으면 추천까지만 (이슈 #111)
+  const recommendOnly = !!view.allowed_actions && !view.allowed_actions.includes("BUILD_ORDER");
   const all = prompt?.type === "SELECT_CANDIDATE" ? prompt.candidates : [];
   const live = useLiveCheck(view.request_id);
   const recheck = useRecheckLive(view.request_id);
@@ -142,13 +144,24 @@ export default function Candidates({ view, busy, send, decline, back, again }: S
               이전
             </Button>
             <Button disabled={!chosen || busy || liveChecking} onClick={choose}>
-              {busy && action === "select" ? "주문안 만드는 중…" : liveChecking ? "요기요 확인 중…" : "이 가게로"}
+              {busy && action === "select"
+                ? recommendOnly
+                  ? "정하는 중…"
+                  : "주문안 만드는 중…"
+                : liveChecking
+                  ? "요기요 확인 중…"
+                  : recommendOnly
+                    ? "이 가게로 정하기"
+                    : "이 가게로"}
             </Button>
           </>
         )
       }
     >
       {view.notice && <Banner tone="warn">{view.notice.message}</Banner>}
+      {recommendOnly && (
+        <Banner tone="pri">주문안 만들기는 맡기지 않아서 추천까지만 해 드려요. 가게를 정하면 요기요에서 직접 주문할 수 있게 넘겨 드려요.</Banner>
+      )}
       {((prompt?.type === "SELECT_CANDIDATE" && prompt.search_notice) || nearNotice) && (
         <Banner tone="pri">
           {prompt?.type === "SELECT_CANDIDATE" && prompt.search_notice}

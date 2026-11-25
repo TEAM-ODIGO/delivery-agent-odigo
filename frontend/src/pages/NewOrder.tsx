@@ -127,8 +127,8 @@ function DelegationSummary({ onOpen }: { onOpen: () => void }) {
       {/* 찾기 → 주문안 → 결제 단계를 아이콘으로 잇는다. 맡기지 않은 단계는 회색 (이슈 #101) */}
       <div className="delegation-flow">
         {ALL_ACTIONS.map((a, i) => {
-          const on = d.allowed_actions.includes(a);
-          const prevOn = i > 0 && d.allowed_actions.includes(ALL_ACTIONS[i - 1]);
+          const on = a === "SEARCH" || d.allowed_actions.includes(a); // 가게 찾기는 항상 (이슈 #111)
+          const prevOn = i > 0 && (ALL_ACTIONS[i - 1] === "SEARCH" || d.allowed_actions.includes(ALL_ACTIONS[i - 1]));
           return (
             <Fragment key={a}>
               {i > 0 && <i className={`flow-line${on && prevOn ? " on" : ""}`} />}

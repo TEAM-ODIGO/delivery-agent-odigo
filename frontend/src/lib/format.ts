@@ -41,6 +41,8 @@ export const STATE_BADGE: Record<RunState, { label: string; tone: "ok" | "pri" |
   BLOCKED: { label: "진행 차단", tone: "bad" },
   FAILED: { label: "처리 실패", tone: "bad" },
   CANCELLED: { label: "취소됨", tone: "gray" },
+  RECOMMENDED: { label: "추천 완료", tone: "ok" },
+  HANDED_OFF: { label: "주문안 전달", tone: "ok" },
 };
 
 // 사용자가 대답해야 하는 상태 (이때만 취소 버튼)

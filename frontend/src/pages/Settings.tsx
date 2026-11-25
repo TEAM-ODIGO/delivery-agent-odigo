@@ -48,7 +48,10 @@ function DelegationEditor({
   onBack: () => void;
   onApply: (d: Delegation) => void;
 }) {
-  const [actions, setActions] = useState<Action[]>(initial.allowed_actions);
+  // 가게 찾기는 ODIGO의 기본 일이라 항상 켜져 있다 (이슈 #111)
+  const [actions, setActions] = useState<Action[]>(() =>
+    initial.allowed_actions.includes("SEARCH") ? initial.allowed_actions : ["SEARCH", ...initial.allowed_actions],
+  );
   const [limit, setLimit] = useState(
     initial.max_charge_krw ? String(initial.max_charge_krw) : "",
   );
@@ -67,12 +70,18 @@ function DelegationEditor({
     const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
     setPicked(next.length === all.length ? null : next);
   };
-  const toggleAction = (a: Action) =>
-    setActions((cur) =>
-      cur.includes(a)
-        ? cur.filter((x) => x !== a)
-        : ALL_ACTIONS.filter((x) => x === a || cur.includes(x)),
-    );
+  // 결제 요청은 주문안이 있어야 할 수 있다: 주문안을 끄면 결제도 끄고, 결제를 켜면 주문안도 켠다 (이슈 #111)
+  const toggleAction = (a: Action) => {
+    if (a === "SEARCH") return;
+    setActions((cur) => {
+      if (cur.includes(a)) {
+        const off = a === "BUILD_ORDER" ? ["BUILD_ORDER", "REQUEST_PAYMENT"] : [a];
+        return cur.filter((x) => !off.includes(x));
+      }
+      const on = a === "REQUEST_PAYMENT" ? ["BUILD_ORDER", "REQUEST_PAYMENT"] : [a];
+      return ALL_ACTIONS.filter((x) => on.includes(x) || cur.includes(x));
+    });
+  };
   const amount = limit ? Number(limit.replace(/[^0-9]/g, "")) : null;
   const noMethod = picked !== null && picked.length === 0;
   // 카드 옆 ⋮ 를 누르면 그 카드의 혜택 모달 (첫 화면 NFC 태그 때와 같은 모달)
@@ -176,21 +185,31 @@ function DelegationEditor({
         <div>
           {ALL_ACTIONS.map((a) => (
             <div className="toggle-row" key={a}>
-              <span>{ACTION_LABEL[a]}</span>
+              <span>
+                {ACTION_LABEL[a]}
+                {a === "SEARCH" && <span className="faint small"> · 기본</span>}
+              </span>
               <button
                 className={`switch${actions.includes(a) ? " on" : ""}`}
                 role="switch"
                 aria-checked={actions.includes(a)}
                 aria-label={ACTION_LABEL[a]}
+                disabled={a === "SEARCH"}
                 onClick={() => toggleAction(a)}
               />
             </div>
           ))}
         </div>
-        {!actions.includes("REQUEST_PAYMENT") && (
+        {!actions.includes("BUILD_ORDER") ? (
           <div className="banner warn">
-            결제 요청을 끄면 주문안까지만 만들고 결제 전에 멈춰요.
+            주문안 만들기를 끄면 가게 추천까지만 해 드려요. 고른 가게는 요기요에서 직접 주문해 주세요.
           </div>
+        ) : (
+          !actions.includes("REQUEST_PAYMENT") && (
+            <div className="banner warn">
+              결제 요청을 끄면 주문안까지만 만들고 결제는 하지 않아요. 요기요에서 직접 결제해 주세요.
+            </div>
+          )
         )}
 
         <div className="section-title">최대 결제 금액</div>

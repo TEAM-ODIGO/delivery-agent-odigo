@@ -1,10 +1,21 @@
-// 06a 결제 완료 · 06b 결제 확인 중 · 05b 진행 차단 · 06c 실패/취소
+// 06a 결제 완료 · 06b 결제 확인 중 · 05b 진행 차단 · 06c 실패/취소 · 추천 완료·주문안 전달 (이슈 #111)
 import { useNavigate } from "react-router-dom";
 import type { StepProps } from "../pages/RunPage";
 import type { OrderView } from "../api/types";
 import { Button, Row, Screen, StatusIcon, Tag } from "../components/ui";
 import YogiyoCart from "../components/YogiyoCart";
 import { BLOCK_REASON, EXCLUDE_REASON, FAIL_TEXT, krw } from "../lib/format";
+
+// 요기요 웹은 배달 주소가 없는 탭에서 가게 주소를 열면 첫 화면으로 보낸다. 주소는 탭마다 기억하므로
+// 늘 같은 탭에서 열어, 요기요에서 주소를 정한 뒤 다시 누르면 가게가 열리게 한다.
+const YOGIYO_TAB = "odigo-yogiyo";
+function openYogiyo(url: string) {
+  const w = window.open(url, YOGIYO_TAB);
+  if (w) {
+    w.opener = null;
+    w.focus();
+  }
+}
 
 function OrderRows({ order, hideMethod }: { order: OrderView; hideMethod?: boolean }) {
   return (
@@ -76,6 +87,81 @@ export function Paying({ view }: StepProps) {
         <Row label="결제 상태" value={<Tag tone="pri">{status}</Tag>} />
         <Row label="자동 새로고침" value="3초마다" />
       </div>
+    </Screen>
+  );
+}
+
+// 주문안 만들기를 맡기지 않음: 추천까지만 하고 요기요로 넘긴다 (이슈 #111)
+export function Recommended({ view }: StepProps) {
+  const nav = useNavigate();
+  const rec = view.result?.recommendation;
+  return (
+    <Screen
+      title="추천해 드렸어요"
+      step={view.step}
+      footer={
+        <>
+          <Button kind="secondary" onClick={() => nav("/")}>
+            새 주문
+          </Button>
+          {rec && (
+            <Button onClick={() => openYogiyo(rec.yogiyo_url)}>요기요에서 주문하기</Button>
+          )}
+        </>
+      }
+    >
+      <StatusIcon tone="ok">✓</StatusIcon>
+      <h2 className="center" style={{ margin: 0, fontSize: 17 }}>
+        가게를 정했어요
+      </h2>
+      <p className="center muted" style={{ margin: 0 }}>
+        주문안 만들기는 맡기지 않아서 여기까지 해 드렸어요. 요기요에서 아래 메뉴로 직접 주문해 주세요.
+      </p>
+      {rec && (
+        <div className="card">
+          <Row label="가게" value={rec.restaurant_name} />
+          <Row label="추천 메뉴" value={rec.items.map((i) => `${i.name} × ${i.quantity}`).join(", ")} />
+          {rec.estimated_total_krw != null && <Row label="예상 금액" value={krw(rec.estimated_total_krw)} />}
+        </div>
+      )}
+    </Screen>
+  );
+}
+
+// 결제 요청을 맡기지 않음: 주문안까지 만들고 결제는 사용자가 요기요에서 (이슈 #111)
+export function HandedOff({ view }: StepProps) {
+  const nav = useNavigate();
+  const r = view.result;
+  const order = r?.order;
+  return (
+    <Screen
+      title="주문안을 넘겨 드렸어요"
+      step={view.step}
+      footer={
+        <>
+          <Button kind="secondary" onClick={() => nav("/")}>
+            새 주문
+          </Button>
+          {r?.yogiyo_url && (
+            <Button onClick={() => openYogiyo(r.yogiyo_url!)}>요기요에서 결제하기</Button>
+          )}
+        </>
+      }
+    >
+      <StatusIcon tone="ok">✓</StatusIcon>
+      <h2 className="center" style={{ margin: 0, fontSize: 17 }}>
+        {order ? `${krw(order.charge_krw)} 주문안이 준비됐어요` : "주문안이 준비됐어요"}
+      </h2>
+      <p className="center muted" style={{ margin: 0 }}>
+        결제 요청은 맡기지 않아서 ODIGO는 결제하지 않았어요. 요기요에서 아래 메뉴를 담아 직접 결제해 주세요.
+      </p>
+      {order && (
+        <div className="card">
+          <OrderRows order={order} />
+          <Row label="예상 결제 금액" value={krw(order.charge_krw)} />
+        </div>
+      )}
+      <YogiyoCart requestId={view.request_id} />
     </Screen>
   );
 }
