@@ -32,6 +32,14 @@ const lastChecked = (lc: LiveCheckView) =>
 // 후보 목록 위의 진행 바 (확인 중일 때만): "요기요에서 지금 주문 가능한지 확인 중 (2/3)"
 // 확인 중에는 배지가 바뀌고 다음 순번 가게가 나타나 목록이 움직이므로 위에 크게 알린다.
 // 확인이 끝나면 위에서 사라지고, 목록 맨 아래 LiveCheckNote 한 줄로 내려간다 (이슈 #68)
+// 확인 진행 문구: "요기요에서 지금 주문 가능한지 확인 중 (2/3)" (결과가 아직 없으면 개수 없이)
+export function liveCheckText(lc: LiveCheckView | null | undefined): string {
+  const shown = lc ? lc.results.filter((r) => r.visible !== false) : [];
+  if (shown.length === 0) return "요기요에서 지금 주문 가능한지 확인 중…";
+  const done = shown.filter((r) => r.status !== "CHECKING").length;
+  return `요기요에서 지금 주문 가능한지 확인 중 (${done}/${shown.length})`;
+}
+
 export function LiveCheckBar({ lc }: { lc: LiveCheckView }) {
   if (lc.state !== "RUNNING") return null;
   const shown = lc.results.filter((r) => r.visible !== false);
@@ -40,7 +48,7 @@ export function LiveCheckBar({ lc }: { lc: LiveCheckView }) {
   return (
     <div className="live-bar" role="status" aria-live="polite">
       <div className="live-bar-row">
-        <span className="small">{`요기요에서 지금 주문 가능한지 확인 중 (${done}/${shown.length})`}</span>
+        <span className="small">{liveCheckText(lc)}</span>
       </div>
       <div className="live-track" aria-hidden>
         <i style={{ width: `${pct}%` }} />
