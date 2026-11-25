@@ -25,7 +25,7 @@ const FACE_IMAGE: Record<string, { local: string; official?: string }> = {
   "PRD-CARD-E": { local: "/cards/PRD-CARD-E" }, // 현대카드 ZERO Up
   "PRD-CARD-F": { local: "/cards/PRD-CARD-F" }, // 요기요 삼성카드
 };
-const IMAGE_EXTS = ["png", "jpg", "webp"];
+const IMAGE_EXTS = ["webp", "png", "jpg"];
 
 function imageCandidates(productId: string): string[] {
   const face = FACE_IMAGE[productId];

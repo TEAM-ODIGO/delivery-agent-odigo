@@ -25,7 +25,7 @@ export default function TopBar() {
       <div className="topbar">
         <span className="topbar-side" />
         <button className="topbar-title" onClick={() => nav("/")} aria-label="ODIGO 처음 화면">
-          <img src="/images/odigo-logo.png" alt="" />
+          <img src="/images/odigo-logo.webp" alt="" />
           ODIGO
         </button>
         <button className="topbar-menu" onClick={() => setOpen(true)} aria-label="메뉴 열기" aria-expanded={open}>

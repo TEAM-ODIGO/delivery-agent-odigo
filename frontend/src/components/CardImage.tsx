@@ -7,7 +7,7 @@
 // frontend/.env 에 VITE_CARD_IMAGE_LAYOUT=landscape 를 쓰면 가로형으로 눕혀서 보여 준다 (개발 서버를 다시 켠다).
 import { useState } from "react";
 
-const EXTS = ["png", "jpg", "jpeg", "webp", "svg"];
+const EXTS = ["webp", "png", "jpg", "jpeg", "svg"];
 const LANDSCAPE = import.meta.env.VITE_CARD_IMAGE_LAYOUT === "landscape";
 const RATIO = 1.586; // 신용카드 긴 변 : 짧은 변
 
