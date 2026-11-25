@@ -37,10 +37,8 @@ export function cartBlockReason(job: YogiyoCartJob | undefined, starting = false
 }
 
 // 담는 동안 보여 줄 문구 (장바구니 카드와 승인 화면 전체 로딩이 같이 쓴다)
-export function cartWaitingText(job: YogiyoCartJob | undefined): string {
-  return job?.mode === "remote" && job.status === "QUEUED"
-    ? "요기요 담기 PC(작업기)가 가져가길 기다리는 중…"
-    : "요기요에서 담는 중…";
+export function cartWaitingText(): string {
+  return "요기요에서 담는 중…";
 }
 
 // 승인 화면에 들어오면 한 번 자동으로 담기를 시작한다 (아직 담은 적이 없을 때만)
@@ -95,7 +93,7 @@ export default function YogiyoCart({ requestId, requotedJobId }: { requestId: st
       </span>
 
       {(active || status === "NONE") && (
-        <span className="muted">{cartWaitingText(data)}</span>
+        <span className="muted">{cartWaitingText()}</span>
       )}
 
       {data && !active && status !== "NONE" && (

@@ -44,7 +44,7 @@ const CUISINE_IMAGES: Record<string, string> = {
   "카페/디저트": "cafe",
 };
 const cuisineImage = (cuisine?: string | null) =>
-  `/images/cuisine/${(cuisine && CUISINE_IMAGES[cuisine]) || "default"}.png`;
+  `/images/cuisine/${(cuisine && CUISINE_IMAGES[cuisine]) || "default"}.webp`;
 const DEFAULT_SHOWN = 3; // 확인 결과가 오기 전에 보여 줄 후보 수 (예비 후보는 숨김)
 
 export default function Candidates({ view, busy, send, decline, back, again }: StepProps) {

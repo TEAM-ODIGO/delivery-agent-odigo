@@ -139,7 +139,7 @@ export default function Approval({ view, busy, send, back }: StepProps) {
       }
     >
       {cartLoading && (
-        <RobotOverlay label={requoting ? "요기요 금액으로 다시 계산 중…" : cartWaitingText(cart.data)}>
+        <RobotOverlay label={requoting ? "요기요 금액으로 다시 계산 중…" : cartWaitingText()}>
           {!requoting && (
             <button className="link" onClick={back} disabled={busy}>
               이전으로
