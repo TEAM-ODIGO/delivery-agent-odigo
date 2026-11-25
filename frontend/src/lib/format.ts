@@ -41,6 +41,8 @@ export const STATE_BADGE: Record<RunState, { label: string; tone: "ok" | "pri" |
   BLOCKED: { label: "진행 차단", tone: "bad" },
   FAILED: { label: "처리 실패", tone: "bad" },
   CANCELLED: { label: "취소됨", tone: "gray" },
+  RECOMMENDED: { label: "추천 완료", tone: "ok" },
+  HANDED_OFF: { label: "주문안 전달", tone: "ok" },
 };
 
 // 사용자가 대답해야 하는 상태 (이때만 취소 버튼)
@@ -78,6 +80,7 @@ export const EXCLUDE_REASON: Record<string, string> = {
   LOCAL_CURRENCY_INSUFFICIENT_BALANCE: "잔액 부족",
   PAYMENT_METHOD_NOT_ACTIVE: "사용 중지된 수단",
   PAYMENT_REQUIREMENT_NOT_MET: "결제 조건 불충족",
+  RULE_NOT_FOUND: "혜택 규칙 없는 카드", // 내 카드 추가로 넣은 다른 카드사 카드 (로컬 확장)
 };
 
 // 실패 코드 → 기본 문구 (error.message가 없을 때)
@@ -127,19 +130,19 @@ export const FAIL_SHORT: Record<string, string> = {
   DEPENDENCY_UNAVAILABLE: "서비스 장애",
   REQUEST_REJECTED: "결제 요청 거절",
   CANDIDATE_UNAVAILABLE: "요기요 주문 불가",
-  MOCK_DECLINED: "모의 결제 거절",
+  MOCK_DECLINED: "결제 거절",
 };
 export const reasonText = (code: string) => BLOCK_REASON[code] ?? FAIL_SHORT[code] ?? EXCLUDE_REASON[code] ?? code;
 
-// 조치할 주문의 이유
+// 살펴볼 주문의 확인할 내용 (이슈 #94: '조치' 대신 '지켜보기 / 확인 필요')
 export function actionText(action: string, stuckMinutes?: number): string {
   switch (action) {
     case "PAYMENT_UNKNOWN":
-      return "결제 결과를 확인해야 해요";
+      return "결제 결과 기다리는 중";
     case "STUCK":
-      return `진행이 ${stuckMinutes ?? ""}분째 멈췄어요`;
+      return `${stuckMinutes ?? ""}분째 멈춤`;
     case "REPEATED_FAILURE":
-      return "같은 사용자가 반복 실패";
+      return "같은 사용자가 여러 번 멈춤";
     case "BLOCKED":
       return "진행 차단";
     case "FAILED":
@@ -148,6 +151,12 @@ export function actionText(action: string, stuckMinutes?: number): string {
       return action;
   }
 }
+
+// 지켜보기: 결제 확인 중·멈춤 (기다리면 풀릴 수 있음) / 확인 필요: 차단·실패
+export const actionLevel = (action: string): { label: string; tone: "warn" | "bad" } =>
+  action === "PAYMENT_UNKNOWN" || action === "STUCK"
+    ? { label: "지켜보기", tone: "warn" }
+    : { label: "확인 필요", tone: "bad" };
 
 // 단계 이력(O-04) 종류 → 문구
 export const EVENT_LABEL: Record<string, string> = {
@@ -199,5 +208,6 @@ export const OWNER_EXCLUSION: Record<string, string> = {
   DELIVERY_TIME_EXCEEDED: "배달 시간 초과",
   NO_REQUESTED_MENU: "찾는 메뉴 없음",
   NO_TASTE_MATCH: "원하는 맛과 안 맞음",
+  MENU_MISSING: "찾는 메뉴 일부 없음",
   OUT_OF_RANK: "조건은 맞지만 순위 밖",
 };

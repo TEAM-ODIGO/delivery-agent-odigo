@@ -13,6 +13,7 @@ ap = argparse.ArgumentParser(description="수집 데이터로 대표 문장 추�
 ap.add_argument("messages", nargs="*")
 ap.add_argument("--data", default=str(Path(__file__).resolve().parents[1] / "data"))
 ap.add_argument("--hour", type=int, default=None, help="이 시각(0~23시) 기준으로 영업 중인 가게만")
+ap.add_argument("--top", type=int, default=5, help="후보 수 (화면에 보이는 수, 이슈 #109)")
 args = ap.parse_args()
 data = Path(args.data)
 os.environ["CATALOG_DATA_DIR"] = str(data)
@@ -26,6 +27,8 @@ from app.modules.discovery.brands import find_brands
 from app.modules.discovery.catalog_models import Restaurant
 from app.modules.discovery.extractor import extract_by_rules
 from app.modules.discovery.search import search
+from app.modules.discovery import choices
+from app.modules.discovery.drinks import search_prefs
 from app.modules.discovery.timeutil import KST
 db = Path(tempfile.mkdtemp()) / "v.db"
 engine = make_engine(f"sqlite:///{db}"); init_db(engine)
@@ -44,11 +47,17 @@ with S() as s:
     for m in msgs:
         c, _ = extract_by_rules(m)
         c["brands"] = find_brands(m, names)
+        # 서버(search_request)처럼 탐색할 때만 쓰는 값도 넣는다: 음료 선호(#107), 맛 방향(#117)
+        prefs = search_prefs(c, m)
+        if prefs:
+            c["drink_prefs"] = prefs
+        c.update(choices.search_prefs(c, m))
         if not c.get("people"): c["people"] = 1
-        bodies, _ = search(s, c, 3, now=when)
-        print(f"\n▶ {m}  (브랜드={c['brands']} 종류={c.get('cuisine')} 메뉴={c.get('menu_keywords')})")
+        bodies, _ = search(s, c, args.top, now=when)
+        print(f"\n▶ {m}  (브랜드={c['brands']} 종류={c.get('cuisine')} 메뉴={c.get('menu_keywords')} 맛={c.get('taste_preferences')}{' 방향=' + str(c['taste_groups']) if c.get('taste_groups') else ''})")
         if bodies and bodies[0].get("search_notice"): print("   안내:", bodies[0]["search_notice"])
         for b in bodies:
             items = ", ".join(f"{i['name']}×{i['quantity']}" for i in b["items"])
-            print(f"   - {b['restaurant']['name']} | {items} | {b.get('match',{}).get('level','EXACT')}")
+            ok = "조건 충족" if b.get("meets_all_constraints") else "조건 일부 벗어남"
+            print(f"   - {b['restaurant']['name']} | {items} | {b.get('match',{}).get('level','EXACT')} | {ok}")
         if not bodies: print("   (후보 없음)")

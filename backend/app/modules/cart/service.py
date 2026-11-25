@@ -4,9 +4,19 @@
 - 작업 스레드는 하나뿐 (요기요에 동시에 여러 브라우저를 띄우지 않게, 시연용 최소 호출).
 - 같은 주문에 담는 중인 작업이 있으면 새로 만들지 않고 그 작업을 돌려준다 (버튼 연타 방지).
 - 결과 캡처는 파일(YOGIYO_CART_DIR)로 두고, 조회 응답에 data URL로 실어 준다 (화면이 바로 표시).
+- remote 모드: 서버는 작업을 QUEUED로 남기기만 하고, 한국 PC의 작업기
+  (scripts/cart_worker.py)가 가져가서(claim) 담은 뒤 결과를 올린다 (cart/router.py).
+  배포 서버(해외 클라우드 IP)는 요기요가 막기 때문이다.
+  작업기가 정해진 시간 안에 가져가지 않거나 끝내지 않으면 가짜 담기로 마무리한다
+  (결제 승인이 막히지 않게).
 
 설정 (.env)
-- YOGIYO_CART_MODE   : fake(기본, Playwright 없이 견적대로 담긴 것처럼) | real(진짜 요기요) | off
+- YOGIYO_CART_MODE   : fake(기본, Playwright 없이 견적대로 담긴 것처럼) | real(진짜 요기요)
+                       | remote(PC 작업기가 진짜 요기요에 담음) | off
+- YOGIYO_CART_REMOTE_WAIT_SECONDS   : remote. 작업기가 이 시간(초) 안에 가져가지 않으면
+                                      가짜로 마무리 (기본 30, 0이면 계속 기다림)
+- YOGIYO_CART_REMOTE_TIMEOUT_SECONDS: remote. 시작부터 이 시간(초) 안에 결과가 없으면
+                                      가짜로 마무리 (기본 180, 0이면 계속 기다림)
 - YOGIYO_CART_HEADLESS: 0(기본, 브라우저 창을 띄움) | 1(창 없이 — 요기요가 Access Denied로 막음)
 - YOGIYO_CART_KEEP_BROWSER: 1(기본) 창을 띄운 경우 새 주문(O-01) 전까지 요기요 창을 둔다
                           0이면 YOGIYO_CART_KEEP_OPEN_SECONDS(초)만큼 열어 둔 뒤 닫는다
@@ -25,7 +35,7 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core import clock as core_clock
@@ -45,12 +55,12 @@ def _env(name: str, default: str) -> str:
     return value or default
 
 
-def _seconds(name: str) -> float:
+def _seconds(name: str, default: str = "0") -> float:
     try:
-        return max(0.0, float(_env(name, "0")))
+        return max(0.0, float(_env(name, default)))
     except ValueError:
-        log.warning("%s 값이 숫자가 아니라 0으로 둔다", name)
-        return 0.0
+        log.warning("%s 값이 숫자가 아니라 %s(으)로 둔다", name, default)
+        return float(default)
 
 
 @dataclass(frozen=True)
@@ -67,6 +77,12 @@ class CartSettings:
     )
     browser_channel: str = field(default_factory=lambda: _env("YOGIYO_CART_BROWSER", ""))
     out_dir: str = field(default_factory=lambda: _env("YOGIYO_CART_DIR", "cart_runs"))
+    remote_wait_seconds: float = field(
+        default_factory=lambda: _seconds("YOGIYO_CART_REMOTE_WAIT_SECONDS", "30")
+    )
+    remote_timeout_seconds: float = field(
+        default_factory=lambda: _seconds("YOGIYO_CART_REMOTE_TIMEOUT_SECONDS", "180")
+    )
 
 
 Filler = Callable[..., CartResult]
@@ -75,6 +91,7 @@ Filler = Callable[..., CartResult]
 def default_filler(cfg: CartSettings) -> Filler | None:
     if cfg.mode == "off":
         return None
+    # remote: 실제 담기는 PC 작업기가 한다. 여기 filler는 작업기가 없을 때 대신 쓰는 가짜 담기
     if cfg.mode == "real":
         if cfg.keep_browser and not cfg.headless:
             keeper = _keeper()
@@ -150,12 +167,17 @@ class CartService:
         self.executor = executor or default_executor()
         self.now = now
 
+    @property
+    def enabled(self) -> bool:
+        """요기요 장바구니 담기를 쓸 수 있는지 (YOGIYO_CART_MODE=off면 False)."""
+        return self.filler is not None
+
     # ------------------------------------------------------------------ 시작 (O-13)
     def start(self, *, request_id: str, user_id: str, quote: dict, message: str = "") -> dict:
         if self.filler is None:
             raise AppError(503, "CART_DISABLED", "요기요 장바구니 담기가 꺼져 있습니다.")
         running = self._latest(request_id, statuses=ACTIVE)
-        if running is not None:
+        if running is not None and not self._fallback_if_stale(running):
             return self.view(running)
         job = CartJob(
             job_id=f"CART-{uuid.uuid4().hex[:16]}",
@@ -183,12 +205,16 @@ class CartService:
         )
         self.session.add(job)
         self.session.commit()
+        if self.cfg.mode == "remote":
+            return self.view(job)  # PC 작업기가 가져간다 (claim)
         self.executor.submit(self._run, job.job_id, message)
         return self.view(job)
 
     # ------------------------------------------------------------------ 조회 (O-14)
     def latest(self, request_id: str) -> dict | None:
         job = self._latest(request_id)
+        if job is not None and self._fallback_if_stale(job):
+            job = self._latest(request_id)
         return self.view(job) if job else None
 
     def _latest(self, request_id: str, statuses: tuple[str, ...] | None = None) -> CartJob | None:
@@ -249,20 +275,7 @@ class CartService:
                 return
             job.status = "RUNNING"
             s.commit()
-            order = CartOrder(
-                restaurant_id=job.restaurant_id,
-                items=[
-                    CartItem(
-                        menu_id=i["menu_id"],
-                        quantity=i["quantity"],
-                        name=i.get("name"),
-                        unit_price_krw=i.get("unit_price_krw"),
-                    )
-                    for i in job.expected["items"]
-                ],
-                expected_menu_subtotal_krw=job.expected.get("menu_subtotal_krw"),
-                expected_delivery_fee_krw=job.expected.get("delivery_fee_krw"),
-            )
+            order = _order(job)
             try:
                 r = self.filler(order, name=job_id, message=message)
             except Exception as exc:  # noqa: BLE001 — 어떤 실패든 작업 결과로 남긴다
@@ -282,6 +295,139 @@ class CartService:
             job.yogiyo_url = r.url
             job.finished_at = self.now()
             s.commit()
+
+    # ------------------------------------------------------------------ remote: PC 작업기
+    def claim(self, worker: str | None = None) -> dict | None:
+        """대기 중인 remote 작업 하나를 RUNNING으로 바꾸고 담을 내용을 돌려준다. 없으면 None.
+
+        작업기가 여러 대여도 같은 작업을 두 번 가져가지 않게, QUEUED일 때만 바꾼다.
+        """
+        for _ in range(5):
+            stmt = (
+                select(CartJob)
+                .where(CartJob.mode == "remote", CartJob.status == "QUEUED")
+                .order_by(CartJob.created_at, CartJob.job_id)
+                .limit(1)
+            )
+            job = self.session.scalars(stmt.execution_options(populate_existing=True)).first()
+            if job is None:
+                return None
+            if self._fallback_if_stale(job):
+                continue  # 너무 오래 기다린 작업은 가짜로 마무리했다 → 다음 작업
+            done = self.session.execute(
+                update(CartJob)
+                .where(CartJob.job_id == job.job_id, CartJob.status == "QUEUED")
+                .values(status="RUNNING")
+            )
+            self.session.commit()
+            if done.rowcount != 1:
+                continue  # 다른 작업기가 먼저 가져감
+            log.info("요기요 담기 작업 %s → PC 작업기 %s", job.job_id, worker or "-")
+            return {
+                "job_id": job.job_id,
+                "restaurant_id": job.restaurant_id,
+                "items": job.expected["items"],
+                "expected_menu_subtotal_krw": job.expected.get("menu_subtotal_krw"),
+                "expected_delivery_fee_krw": job.expected.get("delivery_fee_krw"),
+            }
+        return None
+
+    def submit_result(self, job_id: str, r: CartResult, screenshot: bytes | None = None) -> dict:
+        """PC 작업기가 담은 결과를 저장한다. 이미 끝난 작업(시간 초과로 가짜 마무리 등)이면 409."""
+        job = self.session.get(CartJob, job_id, populate_existing=True)
+        if job is None:
+            raise AppError(404, "CART_JOB_NOT_FOUND", "담기 작업을 찾지 못했습니다.")
+        if job.status in FINISHED:
+            raise AppError(
+                409,
+                "CART_JOB_CLOSED",
+                "이미 끝난 담기 작업이에요 (작업기 응답이 늦어 시연 모드로 마무리했을 수 있어요).",
+            )
+        if job.mode != "remote":
+            raise AppError(404, "CART_JOB_NOT_FOUND", "작업기가 처리할 담기 작업이 아닙니다.")
+        if screenshot:
+            out = Path(self.cfg.out_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            shot = out / f"{job_id}-{r.status}.jpg"
+            shot.write_bytes(screenshot)
+            r.screenshot = str(shot)
+        else:
+            r.screenshot = None
+        if not self._finish(job_id, "RUNNING", r):
+            raise AppError(
+                409,
+                "CART_JOB_CLOSED",
+                "이미 끝난 담기 작업이에요 (작업기 응답이 늦어 시연 모드로 마무리했을 수 있어요).",
+            )
+        return self.view(self.session.get(CartJob, job_id, populate_existing=True))
+
+    def _fallback_if_stale(self, job: CartJob) -> bool:
+        """remote 작업을 작업기가 제때 가져가지(끝내지) 않았으면 가짜 담기로 마무리한다.
+
+        작업기가 꺼져 있어도 승인 화면이 '확인 중'에서 멈추지 않게 하려는 것이다.
+        마무리했으면 True.
+        """
+        if job.mode != "remote" or job.status not in ACTIVE or self.filler is None:
+            return False
+        if job.status == "QUEUED":
+            limit, why = self.cfg.remote_wait_seconds, "PC 작업기가 작업을 가져가지 않아"
+        else:
+            limit, why = self.cfg.remote_timeout_seconds, "PC 작업기가 결과를 보내지 않아"
+        waited = (self.now() - job.created_at).total_seconds()
+        if limit <= 0 or waited < limit:
+            return False
+        r = self.filler(_order(job), name=job.job_id, message="")
+        # 고객 화면에는 사용자용 문구만, 자세한 사정(작업기 응답 없음·가짜 마무리)은 로그와 운영 기록(mode=fake)으로
+        r.error = "요기요 확인이 늦어져 견적 금액 기준으로 마무리했어요."
+        if self._finish(job.job_id, job.status, r, mode="fake"):
+            log.warning("요기요 담기 작업 %s: %s 가짜로 마무리", job.job_id, why)
+        return True
+
+    def _finish(
+        self, job_id: str, from_status: str, r: CartResult, mode: str | None = None
+    ) -> bool:
+        """작업 결과를 저장한다. 상태가 from_status 그대로일 때만 바꾼다.
+
+        작업기 결과와 시간 초과 마무리가 겹쳐도 한 번만 저장된다.
+        """
+        values = {
+            "status": r.status if r.status in FINISHED else "FAILED",
+            "cart_items": r.cart_items,
+            "menu_subtotal_krw": r.menu_subtotal_krw,
+            "delivery_fee_krw": r.delivery_fee_krw,
+            "mismatches": r.mismatches,
+            "error": (r.error or "")[:2000] or None,
+            "screenshot_path": r.screenshot,
+            "yogiyo_url": r.url,
+            "finished_at": self.now(),
+        }
+        if mode:
+            values["mode"] = mode
+        done = self.session.execute(
+            update(CartJob)
+            .where(CartJob.job_id == job_id, CartJob.status == from_status)
+            .values(**values)
+        )
+        self.session.commit()
+        return done.rowcount == 1
+
+
+def _order(job: CartJob) -> CartOrder:
+    """작업 행의 견적(expected)으로 요기요에 담을 주문을 만든다."""
+    return CartOrder(
+        restaurant_id=job.restaurant_id,
+        items=[
+            CartItem(
+                menu_id=i["menu_id"],
+                quantity=i["quantity"],
+                name=i.get("name"),
+                unit_price_krw=i.get("unit_price_krw"),
+            )
+            for i in job.expected["items"]
+        ],
+        expected_menu_subtotal_krw=job.expected.get("menu_subtotal_krw"),
+        expected_delivery_fee_krw=job.expected.get("delivery_fee_krw"),
+    )
 
 
 def _data_url(path: str | None) -> str | None:

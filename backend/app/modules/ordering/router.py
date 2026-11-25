@@ -21,6 +21,7 @@ from app.modules.ordering.schemas import (
     CreateOrderPlanBody,
     ExecutionCheckBody,
     PaymentEventBody,
+    RequoteBody,
 )
 from app.modules.ordering.security import require_service_token
 from app.modules.ordering.service import OrderingService
@@ -96,6 +97,18 @@ def create_approval_target(
     idempotency_key: str | None = Header(default=None),
 ):
     return respond(service.create_approval_target(order_plan_id, body, idempotency_key, x_request_id))
+
+
+@router.post("/order-plans/{order_plan_id}/requotes", dependencies=protected,
+             summary="B-10 (로컬 확장, #86) 요기요 장바구니 가격으로 재견적")
+def requote(
+    order_plan_id: str,
+    body: RequoteBody,
+    service: OrderingService = Depends(get_service),
+    x_request_id: str | None = Header(default=None),
+    idempotency_key: str | None = Header(default=None),
+):
+    return respond(service.requote(order_plan_id, body, idempotency_key, x_request_id))
 
 
 @router.post("/order-plans/{order_plan_id}/execution-checks", dependencies=protected,

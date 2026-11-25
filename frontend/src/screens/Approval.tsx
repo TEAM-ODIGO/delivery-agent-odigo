@@ -12,17 +12,19 @@ import {
   readCardTap,
   savePendingTap,
 } from "../lib/nfc";
-import { Banner, Button, Row, Screen, Tag } from "../components/ui";
+import { Banner, Button, RobotOverlay, Row, Screen, Tag } from "../components/ui";
 import { clock, krw, secondsLeft, unverifiedTexts } from "../lib/format";
 import { useNow } from "../lib/hooks";
-import YogiyoCart, { cartBlockReason, useYogiyoCart } from "../components/YogiyoCart";
+import YogiyoCart, { cartBlockReason, cartWaitingText, useAutoStartCart, useYogiyoCart } from "../components/YogiyoCart";
 import { useIsMutating } from "@tanstack/react-query";
 
-export default function Approval({ view, busy, send, cancel }: StepProps) {
+export default function Approval({ view, busy, send, back }: StepProps) {
   const now = useNow();
   const prompt = view.prompt;
   const [tapping, setTapping] = useState(false);
   const [tapError, setTapError] = useState<string | null>(null);
+  // 요기요 금액 반영을 시도한 담기 작업 (이슈 #86): 같은 결과로 두 번 보내지 않고, 실패하면 막지 않는다
+  const [requoteTried, setRequoteTried] = useState<string | null>(null);
   const tapCtrl = useRef<AbortController | null>(null);
   // 아이폰: 웹에서 NFC를 직접 못 읽는다. 카드를 대면 iOS가 카드의 URL(/tap)을 Safari로 열고, 그 화면이 결제를 보낸다
   const iphoneMode = NFC_PAY && !canReadNfcInPage() && isIPhone();
@@ -39,16 +41,30 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
   }, [waitingIphone, view.request_id]);
 
   if (prompt?.type !== "APPROVAL") return null;
-  const { order, checks, unverified_conditions, expires_at, split, over_budget } = prompt;
+  const { order, checks, unverified_conditions, expires_at, split, over_budget, requote } = prompt;
   const left = secondsLeft(expires_at, now);
   const expired = left === 0;
   const unverified = unverifiedTexts(unverified_conditions);
   const cart = useYogiyoCart(view.request_id);
+  useAutoStartCart(view.request_id);
   const starting = useIsMutating({ mutationKey: ["yogiyo-cart-start", view.request_id] }) > 0;
   const cartBlock = cartBlockReason(cart.data, starting);
+  // 요기요 장바구니 금액이 견적과 다르면 그 금액으로 견적·승인을 다시 만든다 (이슈 #86, 서버가 B·C·D를 다시 거침)
+  const mismatchJob = cart.data?.status === "CART_MISMATCH" ? cart.data.job_id : undefined;
+  const needsRequote = !!mismatchJob && requote?.cart_job_id !== mismatchJob && requoteTried !== mismatchJob;
+  useEffect(() => {
+    if (!needsRequote || busy || !mismatchJob) return;
+    setRequoteTried(mismatchJob);
+    send({ type: "REQUOTE_FROM_CART" });
+  }, [needsRequote, busy, mismatchJob, send]);
+  const requoting = !!mismatchJob && requote?.cart_job_id !== mismatchJob && (needsRequote || busy);
+  // 자동 재계산 요청이 실패했으면(서버 오류 등) 조용히 넘어가지 않고 다시 시도할 수 있게 보여 준다
+  const requoteFailed = !!mismatchJob && requote?.cart_job_id !== mismatchJob && requoteTried === mismatchJob && !busy;
   // NFC 태그는 카드 결제일 때만 받는다. 지역화폐 단독 결제는 카드가 없으니 태그 없이 바로 결제하고,
   // 잔액이 모자라면 E가 INSUFFICIENT_BALANCE로 거절한다. (분할결제는 payment_method가 나머지를 낼 카드라 태그 필요)
-  const needsTap = NFC_PAY && order.payment_method.type !== "LOCAL_CURRENCY";
+  // 결제 요청을 맡기지 않았으면 결제하지 않고 주문안만 받는다 (이슈 #111): 카드 태그 없음
+  const payByUser = !!view.allowed_actions && !view.allowed_actions.includes("REQUEST_PAYMENT");
+  const needsTap = NFC_PAY && !payByUser && order.payment_method.type !== "LOCAL_CURRENCY";
 
   async function approve() {
     if (!needsTap) {
@@ -89,28 +105,54 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
   }
 
   const waiting = tapping || waitingIphone;
+  // 요기요에서 담는 중이거나 요기요 금액으로 다시 계산하는 중이면 화면 전체에 로봇 로딩을 띄운다 (실패하면 내린다)
+  const cartLoading = (!!cartBlock && cart.data?.status !== "FAILED") || requoting;
 
   return (
     <Screen
-      title="이대로 결제할까요?"
+      title={payByUser ? "이대로 주문안을 받을까요?" : "이대로 결제할까요?"}
       step={view.step}
       footer={
         <>
+          {/* 이전 (이슈 #68): 주문을 취소하고 같은 문장이 채워진 입력 화면으로 */}
           {waiting ? (
             <Button kind="secondary" onClick={stopTap}>
               태그 취소
             </Button>
           ) : (
-            <Button kind="secondary" onClick={cancel} disabled={busy}>
-              취소
+            <Button kind="secondary" onClick={back} disabled={busy}>
+              이전
             </Button>
           )}
-          <Button onClick={approve} disabled={busy || expired || !!cartBlock || waiting}>
-            {busy ? "결제 요청 중…" : waiting ? "카드를 대 주세요…" : needsTap ? "승인하고 카드 태그" : "승인하고 결제"}
+          <Button onClick={approve} disabled={busy || expired || !!cartBlock || waiting || requoting}>
+            {requoting
+              ? "요기요 금액으로 다시 계산 중…"
+              : busy
+              ? payByUser
+                ? "주문안 정리 중…"
+                : "결제 요청 중…"
+              : waiting
+                ? "카드를 대 주세요…"
+                : cartBlock && cart.data?.status !== "FAILED"
+                  ? "요기요 확인 중…"
+                  : payByUser
+                    ? "주문안 받기"
+                    : needsTap
+                      ? "승인하고 카드 태그"
+                      : "승인하고 결제"}
           </Button>
         </>
       }
     >
+      {cartLoading && (
+        <RobotOverlay label={requoting ? "요기요 금액으로 다시 계산 중…" : cartWaitingText()}>
+          {!requoting && (
+            <button className="link" onClick={back} disabled={busy}>
+              이전으로
+            </button>
+          )}
+        </RobotOverlay>
+      )}
       {over_budget && (
         <Banner tone="warn">
           예산 {krw(over_budget.limit_krw)}보다 {krw(over_budget.over_krw)} 많은 주문이에요. 앞에서 확인하신 대로
@@ -131,30 +173,43 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
         ))}
         <Row label="배달비" value={krw(order.delivery_fee_krw)} />
         {order.instant_discount_krw > 0 && (
-          <Row label={`${order.payment_method.name} 즉시할인`} value={`−${krw(order.instant_discount_krw)}`} tone="ok" />
+          <Row label={`${order.payment_method.name} 할인`} value={`−${krw(order.instant_discount_krw)}`} tone="ok" />
         )}
         <div className="divider" />
+        {requote && requote.previous.charge_krw !== order.charge_krw && (
+          <div className="title-row price-old">
+            <span>이전 견적</span>
+            <s>{krw(requote.previous.charge_krw)}</s>
+          </div>
+        )}
         <div className="title-row">
-          <b>결제 금액</b>
+          <b>내실 금액</b>
           <span className="big-price">{krw(order.charge_krw)}</span>
         </div>
-        {split ? (
+        {requote && (
+          <div className="requote-note">
+            <Tag tone="pri">요기요 실시간 반영</Tag>
+            <span className="muted">
+              {requote.changes
+                .map((c) => `${c.kind === "DELIVERY_FEE" ? "배달비" : c.name ?? "메뉴"} ${krw(c.from_krw)} → ${krw(c.to_krw)}`)
+                .join(" · ")}
+            </span>
+          </div>
+        )}
+        {split && (
           <>
             <Row label={`지역화폐 · ${split.local_currency.name ?? split.local_currency.payment_method_id}`} value={krw(split.local_currency.charge_krw)} />
             <Row label={`카드 · ${split.remainder.name ?? split.remainder.payment_method_id}`} value={krw(split.remainder.charge_krw)} />
           </>
-        ) : (
-          <span className="muted">결제수단 {order.payment_method.name}</span>
         )}
       </div>
 
       {checks.length > 0 && (
         <>
-          <div className="section-title">확인한 조건</div>
+          <div className="section-title">말씀하신 조건에 맞는지 확인했어요</div>
           {checks.map((c) => (
             <div className="check-row" key={c}>
               <span>✓ {c}</span>
-              <Tag tone="ok">D 검증</Tag>
             </div>
           ))}
         </>
@@ -162,7 +217,7 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
 
       {unverified.length > 0 && (
         <>
-          <div className="section-title">확인 못 한 조건</div>
+          <div className="section-title">확인하지 못한 부분</div>
           {unverified.map((u) => (
             <Banner key={u}>{u}</Banner>
           ))}
@@ -174,8 +229,16 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
           {expired ? "승인 유효시간이 지났어요. 취소 후 다시 주문해 주세요." : `승인은 ${clock(expires_at)}까지 유효해요`}
         </Banner>
       )}
-      <YogiyoCart requestId={view.request_id} />
-      {cartBlock && <Banner tone="bad">{cartBlock}</Banner>}
+      <YogiyoCart requestId={view.request_id} requotedJobId={requote?.cart_job_id} />
+      {requoteFailed && (
+        <>
+          <Banner tone="bad">요기요 금액으로 다시 계산하지 못했어요. 지금 내실 금액은 이전 견적 기준이에요.</Banner>
+          <Button kind="secondary" onClick={() => send({ type: "REQUOTE_FROM_CART" })}>
+            요기요 금액으로 다시 계산
+          </Button>
+        </>
+      )}
+      {cartBlock && <Banner tone={cart.data?.status === "FAILED" ? "bad" : "pri"}>{cartBlock}</Banner>}
       {tapping && (
         <Banner tone="pri">결제할 NFC 카드({order.payment_method.name})를 휴대폰 뒷면에 대 주세요</Banner>
       )}
@@ -186,9 +249,11 @@ export default function Approval({ view, busy, send, cancel }: StepProps) {
       )}
       {tapError && <Banner tone="bad">{tapError}</Banner>}
       <p className="faint">
-        {needsTap
-          ? "카드를 태그하면 바로 결제가 시작되고, 그 뒤에는 취소할 수 없어요."
-          : "승인하면 바로 결제가 시작되고, 그 뒤에는 취소할 수 없어요."}
+        {payByUser
+          ? "결제 요청은 맡기지 않아서 ODIGO가 결제하지 않아요. 주문안을 받아 요기요에서 직접 결제해 주세요."
+          : needsTap
+            ? "카드를 태그하면 바로 결제가 시작되고, 그 뒤에는 취소할 수 없어요."
+            : "승인하면 바로 결제가 시작되고, 그 뒤에는 취소할 수 없어요."}
       </p>
     </Screen>
   );

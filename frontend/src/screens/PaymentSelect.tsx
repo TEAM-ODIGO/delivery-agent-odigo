@@ -1,12 +1,14 @@
 // 04 결제수단 선택 — prompt.options / order / excluded / expires_at
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api, getUserToken } from "../api/client";
 import type { StepProps } from "../pages/RunPage";
 import { CardImage } from "../components/CardImage";
 import { Banner, Button, Row, Screen, Tag } from "../components/ui";
 import { clock, EXCLUDE_REASON, krw, secondsLeft } from "../lib/format";
 import { useNow } from "../lib/hooks";
 
-export default function PaymentSelect({ view, busy, send, cancel }: StepProps) {
+export default function PaymentSelect({ view, busy, send, back }: StepProps) {
   const now = useNow();
   const prompt = view.prompt;
   const [picked, setPicked] = useState<string | null>(
@@ -14,6 +16,9 @@ export default function PaymentSelect({ view, busy, send, cancel }: StepProps) {
   );
   const [splitOn, setSplitOn] = useState(false);
   const [localText, setLocalText] = useState("");
+  // 내 카드 추가로 새 ID가 생긴 카드도 상품별 카드 이미지가 보이게 상품 ID를 찾는다 (실패해도 기본 카드 모양으로 보인다)
+  const myCards = useQuery({ queryKey: ["my-cards", getUserToken()], queryFn: api.myCards, retry: false });
+  const productOf = (id: string) => myCards.data?.results.find((c) => c.payment_method_id === id)?.product_id ?? null;
   if (prompt?.type !== "SELECT_PAYMENT_METHOD") return null;
   const { options, order, excluded, expires_at } = prompt;
   const left = secondsLeft(expires_at, now);
@@ -37,8 +42,9 @@ export default function PaymentSelect({ view, busy, send, cancel }: StepProps) {
       step={{ ...view.step, label: `${view.step.label} · 혜택 큰 순` }}
       footer={
         <>
-          <Button kind="secondary" onClick={cancel} disabled={busy}>
-            취소
+          {/* 이전 (이슈 #68): 주문을 취소하고 같은 문장이 채워진 입력 화면으로 (가게를 바꾸려면 다시 추천받기) */}
+          <Button kind="secondary" onClick={back} disabled={busy}>
+            이전
           </Button>
           <Button
             disabled={!chosen || busy || expired || (splitting && !localOk)}
@@ -118,7 +124,7 @@ export default function PaymentSelect({ view, busy, send, cancel }: StepProps) {
           >
             <div className="opt-head">
               <span className={`radio${sel ? " on" : ""}`} />
-              <CardImage id={o.payment_method_id} name={o.name} type={o.method_type} />
+              <CardImage id={o.payment_method_id} name={o.name} type={o.method_type} productId={productOf(o.payment_method_id)} />
               {/* 모든 카드가 같은 짜임: 이름 / 할인 금액 / 할인 이유, 오른쪽에 순위와 결제금액 */}
               <span className="opt-body">
                 <b className="opt-name">{o.name}</b>

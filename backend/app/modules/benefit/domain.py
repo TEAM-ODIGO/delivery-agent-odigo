@@ -107,14 +107,23 @@ def calculate(method: PaymentMethod, rule: BenefitRule | None, order_krw: int, r
     discount = min(discount, share)
 
     estimated = restaurant.local_currency_basis == "ASSUMED_FROM_VOUCHER"
+    if discount:
+        reasons = [_reason_text(method, rule, discount, estimated)]
+    elif method.type == "LOCAL_CURRENCY":
+        # 충전식 지역화폐는 할인이 없다. 쓴 만큼 충전한 잔액에서 차감된다는 것만 알려 준다.
+        reasons = ["충전한 잔액에서 사용한 만큼 차감" + (" (가맹점 여부는 추정)" if estimated else "")]
+    else:
+        reasons = []
     return Calc(method.payment_method_id, True, discount, share - discount,
                 [{"rule_id": rule.rule_id, "type": rule.type, "amount_krw": discount}] if discount else [],
-                [], [_reason_text(method, rule, discount, estimated)] if discount else [])
+                [], reasons)
 
 
-# 추천에서 "후보 제외(excluded)"로 분류하는 사유. 나머지(MIN_ORDER_NOT_MET, RULE_NOT_FOUND)는 할인 0원으로 후보에 남는다.
+# 추천에서 "후보 제외(excluded)"로 분류하는 사유. 나머지(MIN_ORDER_NOT_MET)는 할인 0원으로 후보에 남는다.
+# RULE_NOT_FOUND(혜택 규칙이 없는 카드, 예: 내 카드 추가로 넣은 다른 카드사 카드)도 제외한다 (로컬 확장, 팀 합의 전):
+# 규칙이 없으면 C-05 재계산이 404라 D·B가 결제를 막으므로, 처음부터 선택지로 보여 주지 않는다.
 EXCLUDE_CODES = {"PAYMENT_METHOD_NOT_ACTIVE", "PAYMENT_REQUIREMENT_NOT_MET", "LOCAL_CURRENCY_NOT_ACCEPTED",
-                 "LOCAL_CURRENCY_UNVERIFIED", "PERFORMANCE_NOT_MET"}
+                 "LOCAL_CURRENCY_UNVERIFIED", "PERFORMANCE_NOT_MET", "RULE_NOT_FOUND"}
 
 
 def recommend(methods, rules_by_product, order_krw, restaurant, used_by_method=None, local_currency_only=False):

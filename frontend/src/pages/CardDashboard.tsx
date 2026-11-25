@@ -1,32 +1,34 @@
-// 내 카드 혜택 (로컬 확장, 팀 합의 전): 결제 중이 아닐 때 NFC 카드를 대면 그 카드의 대시보드를 보여 준다.
-//  - 첫 화면에서는 CardFlipModal(카드가 뒤집히는 모달)이 아래 CardDashboardSections를 뒷면에 그린다
-//  - /card?t=토큰 으로 직접 열면 이 파일의 페이지가 같은 내용을 보여 준다 (링크로 공유할 때 등)
+// 내 카드 혜택 (로컬 확장, 팀 합의 전): 설정 화면 카드 옆 ⋮ 를 누르면 CardFlipModal(카드가 뒤집히는 모달)이
+// 아래 CardDashboardSections를 뒷면에 그린다. 첫 화면 진입과 /card 페이지는 없앴다 (이슈 #83)
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import type { CardDashboard, CardTap, RecentPayment } from "../api/types";
-import { Banner, Button, Modal, Row, Screen, Spinner, Tag } from "../components/ui";
+import { Banner, Button, Modal, Row, Tag } from "../components/ui";
 import { krw, when } from "../lib/format";
 import { useToast } from "../lib/hooks";
 
-// 카드 정보로 혜택을 불러온다 (모달·페이지 공용). 같은 카드를 다시 대면 저장된 값을 먼저 보여 주고 새로 불러온다
-export function useCardDashboard(cardTap: CardTap | null) {
+// 카드 혜택을 불러온다 (모달·페이지 공용). 같은 카드를 다시 열면 저장된 값을 먼저 보여 주고 새로 불러온다
+//  - cardTap: NFC 카드 토큰으로 열 때
+//  - paymentMethodId: 설정 화면에서 카드 옆 ⋮ 를 눌렀을 때
+export function useCardDashboard(cardTap: CardTap | null, paymentMethodId?: string) {
   return useQuery({
-    queryKey: ["card-dashboard", cardTap?.token ?? cardTap?.serial_number ?? ""],
-    queryFn: () => api.cardDashboard(cardTap!),
-    enabled: cardTap !== null,
+    queryKey: paymentMethodId
+      ? ["card-dashboard", "pm", paymentMethodId]
+      : ["card-dashboard", cardTap?.token ?? cardTap?.serial_number ?? ""],
+    queryFn: () => (paymentMethodId ? api.paymentMethodDashboard(paymentMethodId) : api.cardDashboard(cardTap!)),
+    enabled: cardTap !== null || !!paymentMethodId,
     retry: false,
     refetchOnWindowFocus: false,
   });
 }
 
-// 혜택 화면 본문 (카드 앞면 정보 아래 부분). 모달 뒷면과 /card 페이지가 같이 쓴다
+// 혜택 화면 본문 (카드 앞면 정보 아래 부분). 모달 뒷면이 쓴다
 export function CardDashboardSections({ d, onRefunded }: { d: CardDashboard; onRefunded: () => void }) {
   return (
     <>
-      {d.type === "CARD" ? <PerformanceCard d={d} /> : <BalanceCard d={d} />}
+      {d.type !== "CARD" ? <BalanceCard d={d} /> : d.has_benefit_rule ? <PerformanceCard d={d} /> : <UsageOnlyCard d={d} />}
       <BenefitLimitCard d={d} />
       <RecentPayments d={d} onRefunded={onRefunded} />
       <BenefitList d={d} />
@@ -35,67 +37,20 @@ export function CardDashboardSections({ d, onRefunded }: { d: CardDashboard; onR
   );
 }
 
-export default function CardDashboardPage() {
-  const nav = useNavigate();
-  const location = useLocation();
-  const [params] = useSearchParams();
-  // 카드 정보는 처음 들어올 때 한 번만 읽는다 (환불 뒤 다시 불러올 때도 같은 값을 쓴다)
-  const [cardTap] = useState<CardTap | null>(() => {
-    const fromState = (location.state as { cardTap?: CardTap } | null)?.cardTap;
-    if (fromState) return fromState;
-    const t = params.get("t");
-    return t ? { token: t } : null;
-  });
-
-  const dashboard = useCardDashboard(cardTap);
-
-  const home = <Button onClick={() => nav("/", { replace: true })}>처음으로</Button>;
-
-  if (cardTap === null) {
-    return (
-      <Screen title="내 카드 혜택" back={() => nav("/")} footer={home}>
-        <p className="muted">카드 정보가 없어요. 첫 화면에서 카드를 다시 대 주세요.</p>
-      </Screen>
-    );
-  }
-  if (dashboard.isLoading) {
-    return (
-      <Screen title="내 카드 혜택">
-        <Spinner label="카드 혜택을 불러오고 있어요…" />
-      </Screen>
-    );
-  }
-  if (dashboard.isError || !dashboard.data) {
-    const err = dashboard.error;
-    return (
-      <Screen title="카드 혜택을 불러오지 못했어요" back={() => nav("/")} footer={home}>
-        <p className="muted">{err instanceof ApiError ? err.message : "잠시 후 다시 시도해 주세요."}</p>
-      </Screen>
-    );
-  }
-
-  const d = dashboard.data;
+function UsageOnlyCard({ d }: { d: CardDashboard }) {
+  const p = d.performance!;
   return (
-    <Screen
-      title="내 카드 혜택"
-      sub="카드를 대서 열었어요"
-      back={() => nav("/")}
-      footer={<Button onClick={() => nav("/")}>이 카드로 주문하러 가기</Button>}
-    >
-      <CardHero d={d} />
-      <CardDashboardSections d={d} onRefunded={() => dashboard.refetch()} />
-    </Screen>
-  );
-}
-
-function CardHero({ d }: { d: CardDashboard }) {
-  return (
-    <div className={`card-hero ${d.type === "CARD" ? "" : "local"}`}>
+    <div className="card">
       <div className="title-row">
-        <b>{d.name}</b>
-        {d.product.card_kind && <span className="card-hero-kind">{d.product.card_kind}</span>}
+        <b>이번 달 이용액</b>
+        <Tag tone="gray">배달 할인 계산 안 함</Tag>
       </div>
-      {d.product.headline && <span className="card-hero-sub">{d.product.headline}</span>}
+      <span className="big-price">{krw(p.monthly_performance_krw)}</span>
+      <Banner tone="pri">
+        {d.product.product_name
+          ? "이 카드는 결제 금액이 바로 줄어드는 배달 할인 규칙이 없어요. ODIGO 추천·결제 계산에는 쓰이지 않고, 아래 혜택 정보만 보여 드려요."
+          : "이 카드의 혜택 정보를 아직 몰라요. ODIGO 추천·결제 계산에는 쓰이지 않아요."}
+      </Banner>
     </div>
   );
 }

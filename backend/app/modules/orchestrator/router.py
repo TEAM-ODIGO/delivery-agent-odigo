@@ -21,6 +21,7 @@ from app.core.errors import AppError
 from app.modules.cart.service import CartService, release_browser
 from app.modules.orchestrator.schemas import (
     CandidateViews,
+    CardAdd,
     CardDashboardRequest,
     RefundCreate,
     Reply,
@@ -120,6 +121,42 @@ def list_payment_methods(svc: Service, user_id: UserId):
     return svc.list_payment_methods(user_id)
 
 
+# ---------------- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전) ----------------
+@router.get("/my-cards", summary="(로컬 확장) 내 카드 목록 — 어떻게 추가됐는지·뺄 수 있는지 포함")
+def my_cards(svc: Service, user_id: UserId):
+    return svc.my_cards(user_id)
+
+
+@router.get("/my-cards/catalog", summary="(로컬 확장) 혜택 규칙이 있는 카드 목록")
+def my_card_catalog(svc: Service, user_id: UserId):
+    return svc.my_card_catalog()
+
+
+@router.post("/my-cards", status_code=201, summary="(로컬 확장) 내 카드 추가")
+def add_my_card(body: CardAdd, svc: Service, user_id: UserId):
+    return svc.add_card(user_id, body)
+
+
+@router.delete("/my-cards/{payment_method_id}", summary="(로컬 확장) 직접 추가한 카드 빼기")
+def remove_my_card(payment_method_id: str, svc: Service, user_id: UserId):
+    return svc.remove_card(user_id, payment_method_id)
+
+
+@router.post("/mydata/consents", status_code=201, summary="(로컬 확장) 모의 마이데이터 동의")
+def mydata_consent(svc: Service, user_id: UserId):
+    return svc.start_mydata(user_id)
+
+
+@router.get("/mydata/cards", summary="(로컬 확장) 모의 마이데이터 카드 목록")
+def mydata_cards(consent_id: str, svc: Service, user_id: UserId):
+    return svc.mydata_cards(user_id, consent_id)
+
+
+@router.get("/payment-methods/{payment_method_id}/dashboard", summary="(로컬 확장) 내 결제수단 혜택 화면 (설정 화면 ⋮)")
+def payment_method_dashboard(payment_method_id: str, svc: Service, user_id: UserId):
+    return svc.payment_method_dashboard(user_id, payment_method_id)
+
+
 @router.post("/card-taps/dashboard", summary="(로컬 확장) NFC 카드를 대면 내 카드 혜택 화면")
 def card_dashboard(body: CardDashboardRequest, svc: Service, user_id: UserId):
     return svc.card_dashboard(user_id, body.card_tap.model_dump(exclude_none=True))
@@ -141,11 +178,20 @@ def admin_runs(svc: Service, limit: int = 100, state: str | None = None):
 
 @router.get(
     "/admin/summary",
-    summary="O-17 오늘 운영 개요·조치할 주문 (관리자)",
+    summary="O-17 오늘 운영 개요·살펴볼 주문 (관리자)",
     dependencies=[Depends(require_admin)],
 )
 def admin_summary(svc: Service):
     return svc.admin_summary()
+
+
+@router.get(
+    "/admin/events",
+    summary="(로컬 확장) 운영 개요의 최근 주문 흐름 (관리자, 이슈 #94)",
+    dependencies=[Depends(require_admin)],
+)
+def admin_events(svc: Service, limit: int = 30):
+    return svc.admin_events(limit)
 
 
 @router.get(
@@ -197,7 +243,8 @@ def start_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart
 @router.get("/runs/{request_id}/yogiyo-cart", summary="O-14 요기요 장바구니 담기 결과")
 def get_yogiyo_cart(request_id: str, svc: Service, user_id: UserId, cart: Cart):
     svc.check_owner(user_id, request_id)
-    return cart.latest(request_id) or {"status": "NONE"}
+    # 담기가 꺼져 있으면(YOGIYO_CART_MODE=off) OFF: 화면이 '요기요 확인 전'이라고 승인을 막지 않게 (이슈 #64)
+    return cart.latest(request_id) or {"status": "NONE" if cart.enabled else "OFF"}
 
 
 @router.post("/runs/{request_id}/candidate-views", summary="(로컬 확장) 후보 화면에 실제로 보인 후보 기록")

@@ -18,6 +18,7 @@ from app.core.db import SessionLocal, engine, init_db
 from app.core.errors import install_error_handlers
 from app.modules.benefit.catalog_source import use_db_restaurants, use_shared_restaurants
 from app.modules.benefit.router import router as benefit_router
+from app.modules.cart.router import router as cart_worker_router
 from app.modules.delegation.router import router as delegation_router
 from app.modules.discovery.hours import ensure_column as ensure_hours_column
 from app.modules.discovery.hours import sync_from_csv as sync_hours
@@ -83,6 +84,7 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
 
     app.include_router(orchestrator_router)
+    app.include_router(cart_worker_router)  # PC 작업기용 (YOGIYO_CART_MODE=remote)
     app.include_router(delegation_router)
     app.include_router(discovery_router)  # A: /discovery/... (점검용 직접 호출. O는 함수로 호출)
     app.include_router(ordering_router)  # B: /ordering/... (점검용 직접 호출. O는 함수로 호출)

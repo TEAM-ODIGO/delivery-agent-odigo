@@ -10,7 +10,7 @@ from app.modules.discovery.constants import TASTE_ORDER
 ID_PATTERN = r"^[A-Za-z0-9_\-:.]{1,64}$"
 
 # 맛 취향 코드 (constants.TASTES). 명세에 없는 A 확장 조건이라 D·B는 읽지 않아도 된다
-Taste = Literal["SPICY", "SWEET", "SOUP", "CRISPY", "LIGHT", "CHEESY"]
+Taste = Literal["SPICY", "SWEET", "SOUP", "CRISPY", "LIGHT", "CHEESY", "NOODLE", "RICE", "COLD"]
 
 
 def ordered_tastes(values: list[str] | None) -> list[str]:
@@ -94,6 +94,8 @@ class SearchBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     top_n: int = Field(default=3, ge=1, le=10)
+    # A 확장 (이슈 #68, 재추천): 이미 보여 준 가게는 빼고 다음 순위를 찾는다
+    exclude_restaurant_ids: list[str] = Field(default_factory=list, max_length=200)
 
 
 # ---------- A-06 ----------

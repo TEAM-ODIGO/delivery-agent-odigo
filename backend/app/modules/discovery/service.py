@@ -7,13 +7,15 @@
     result = discovery.create_request(db, CreateRequestBody(...))
 """
 
+import re
+
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.modules.discovery.timeutil import now_kst, to_iso
 from app.core.errors import AppError
-from app.modules.discovery import llm
+from app.modules.discovery import choices, llm
 from app.modules.discovery.constants import (
     CLARIFICATION_TEMPLATES,
     CONFIRMED,
@@ -26,6 +28,7 @@ from app.modules.discovery.constants import (
     SOURCE_RULE,
     SOURCE_USER,
 )
+from app.modules.discovery.drinks import find_drink_keywords, is_drink_keyword, search_prefs
 from app.modules.discovery.hours import filter_now
 from app.modules.discovery.extractor import (
     extract_by_rules,
@@ -156,6 +159,9 @@ def _clean_words(values: list[str] | None) -> list[str]:
 
 # ---------------------------------------------------------------- A-01 조건 추출
 
+EXPLICIT_SOUP = re.compile(r"국물|국밥|탕|찌개|뜨끈|따끈|해장|따뜻|뜨거운")
+
+
 def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction | None,
            message: str) -> tuple[dict, dict, str]:
     """규칙 결과를 먼저 쓰고, 규칙이 비워 둔 항목만 LLM 결과로 채운다.
@@ -181,9 +187,12 @@ def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction |
     merged["excluded_ingredients"] = _clean_words(
         rule_constraints["excluded_ingredients"] + grounded_exclusions(message, extraction.excluded_ingredients)
     )
-    merged["menu_keywords"] = _clean_words(
-        rule_constraints["menu_keywords"] + grounded_menu_keywords(message, extraction.menu_keywords)
-    )
+    # 음료(이슈 #107): 규칙이 대표 이름으로 찾으므로 LLM의 '아이스 아메리카노' 같은 구절은 받지 않는다
+    llm_words = [
+        w for w in grounded_menu_keywords(message, extraction.menu_keywords)
+        if is_drink_keyword(w) or not find_drink_keywords(w)
+    ]
+    merged["menu_keywords"] = _clean_words(rule_constraints["menu_keywords"] + llm_words)
     local_only = rule_constraints["payment_requirements"]["local_currency_only"]
     if extraction.local_currency_only and has_hint("local_currency_only", message):
         local_only = True
@@ -193,6 +202,12 @@ def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction |
     # 맵기 상한이 1 이하('안 매운'·'덜 매운')인데 SPICY가 들어오면 뺀다
     if merged["max_spice_level"] is not None and merged["max_spice_level"] <= 1 and "SPICY" in tastes:
         tastes.remove("SPICY")
+    # 음료 주문의 '따뜻한'·'시원한'은 국물·찬 음식이 아니라 온도 (이슈 #107)
+    if any(is_drink_keyword(k) for k in merged["menu_keywords"]):
+        tastes = [t for t in tastes if t not in ("SOUP", "COLD")]
+    # '시원한 거'를 LLM이 국물로도 읽으면, 국물이라고 직접 말하지 않은 한 차가운 음식만 본다 (이슈 #117)
+    if "COLD" in tastes and "SOUP" in tastes and not EXPLICIT_SOUP.search(message):
+        tastes.remove("SOUP")
     merged["taste_preferences"] = tastes
 
     # 규칙 메모는 최종 값이 규칙 결과와 같을 때만 남긴다
@@ -355,7 +370,8 @@ def patch_constraints(db: Session, request_id: str, patch: ConstraintsPatch) -> 
 
 # ---------------------------------------------------------------- A-05 탐색·추천
 
-def search_request(db: Session, request_id: str, top_n: int) -> dict:
+def search_request(db: Session, request_id: str, top_n: int, exclude: list[str] | None = None) -> dict:
+    """exclude: 재추천(이슈 #68)일 때 이미 보여 준 가게. 더 찾을 가게가 없으면 지금 후보를 그대로 둔다."""
     request = _load_for_update(db, request_id)
     if request.status == NEED_CLARIFICATION:
         raise AppError(409, "INVALID_STATUS", "조건 확정 전에는 탐색할 수 없습니다.", {"status": request.status})
@@ -365,7 +381,27 @@ def search_request(db: Session, request_id: str, top_n: int) -> dict:
         })
 
     trace: list[dict] = []
-    bodies, suggestions = search(db, request.constraints, top_n, now=filter_now(), trace=trace)
+    # 음료 온도·디카페인 선호는 조건이 아니라 고를 때만 쓰므로 원래 문장에서 읽어 넘긴다 (이슈 #107)
+    constraints = dict(request.constraints)
+    prefs = search_prefs(constraints, request.original_message or "")
+    if prefs:
+        constraints["drink_prefs"] = prefs
+    # 여러 맛 중 고민하는 요청이면 맛을 방향별로 나눠 따로 찾는다 (이슈 #117)
+    constraints.update(choices.search_prefs(constraints, request.original_message or ""))
+    bodies, suggestions = search(
+        db, constraints, top_n, now=filter_now(), trace=trace, exclude_restaurant_ids=set(exclude or [])
+    )
+    if exclude and not bodies:
+        # 재추천인데 더 없음: 지금 후보(선택 가능 상태)를 그대로 두고 알리기만 한다
+        db.rollback()
+        return {
+            "request_id": request_id,
+            "status": NO_CANDIDATES,
+            "constraints_version": request.constraints_version,
+            "candidates": [],
+            "relaxation_suggestions": suggestions,
+            "search_notice": None,
+        }
     # 요청한 메뉴 대신 비슷한 메뉴로 채웠을 때 그 이유 (이슈 #37, 화면 위 안내)
     notice = bodies[0].pop("search_notice", None) if bodies else None
 

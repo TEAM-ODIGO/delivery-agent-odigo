@@ -1,6 +1,6 @@
 """규칙 기반 조건 추출기.
 
-LLM(Ollama)이 꺼져 있거나 실패해도 주문 흐름이 멈추지 않도록 정규식·단어 사전으로 조건을 뽑는다.
+LLM(OpenRouter·Ollama)이 꺼져 있거나 실패해도 주문 흐름이 멈추지 않도록 정규식·단어 사전으로 조건을 뽑는다.
 LLM이 성공했을 때도 LLM이 놓친 항목을 채우는 데 쓴다.
 
 결과는 (조건 dict, 해석 메모 dict) 이다.
@@ -18,6 +18,7 @@ from app.modules.discovery.constants import (
     TASTE_ORDER,
     TASTES,
 )
+from app.modules.discovery.drinks import find_cups, find_drink_keywords, is_drink_keyword
 
 KOREAN_DIGITS = {"일": 1, "이": 2, "삼": 3, "사": 4, "오": 5, "육": 6, "칠": 7, "팔": 8, "구": 9}
 PEOPLE_WORDS = {"한": 1, "하나": 1, "두": 2, "둘": 2, "세": 3, "셋": 3, "네": 4, "넷": 4, "다섯": 5, "여섯": 6}
@@ -48,10 +49,15 @@ WANT_SPICY = re.compile(r"매운|맵게|얼큰|매콤|칼칼|얼얼|화끈")
 # ---------- 맛 취향 (매운맛은 위의 맵기 규칙으로 정한다) ----------
 TASTE_TRIGGERS = {
     "SWEET": re.compile(r"달달|달콤|달짝|단\s*(?:거|게|걸|것|음식|맛)|디저트|후식|당\s*(?:땡|떨어|충전)"),
-    "SOUP": re.compile(r"국물|뜨끈|따끈|뜨뜻|얼큰|해장|(?:시원|따뜻|뜨거운)한?\s*(?:국|거|음식|걸)"),
+    # '시원한 국물'은 해장 국물이지만 '시원한 거·음식'은 차가운 음식이다 (이슈 #117 → COLD)
+    "SOUP": re.compile(r"국물|뜨끈|따끈|뜨뜻|얼큰|해장|(?:따뜻|뜨거운)한?\s*(?:국|거|음식|걸)|시원한\s*(?:국(?!수)|탕|찌개)"),
     "CRISPY": re.compile(r"바삭|튀긴|튀김|크리스피|겉바"),
     "LIGHT": re.compile(r"담백|가벼운|가볍게|건강한|건강식|깔끔한|다이어트|속\s*편한|자극적이지\s*않|안\s*느끼"),
     "CHEESY": re.compile(r"꾸덕|고소한|느끼한|크리미|치즈\s*(?:듬뿍|가득|많이)|진한\s*(?:거|맛|음식)"),
+    # 음식 모양·온도 (이슈 #117). '라면'·'볶음밥'처럼 메뉴 이름 안의 면·밥은 메뉴 단어로 따로 잡는다
+    "NOODLE": re.compile(r"(?<![가-힣])면\s*(?:종류|요리|류|으로|이\s*땡|땡|음식|메뉴|먹|이\s*좋|위주)|면류|누들|국수\s*(?:종류|류)"),
+    "RICE": re.compile(r"(?<![가-힣])밥\s*(?:종류|요리|류|으로|이\s*땡|땡|메뉴|위주|이\s*좋)|밥류|든든한\s*밥"),
+    "COLD": re.compile(r"차가운|차갑|시원한\s*(?:거|게|걸|것|음식|메뉴|요리|국수|면)|시원하게|시원한\s*걸|찬\s*(?:거|음식|요리)|더워|더운\s*날"),
 }
 # '느끼한 건 싫어', '단 거 말고'처럼 뒤에서 부정하거나, '안 느끼한'처럼 앞에서 부정하면 그 맛은 원하지 않는 것
 TASTE_NEGATION_AFTER = re.compile(
@@ -326,7 +332,9 @@ def normalize_cuisine(value: str | None) -> str | None:
 
 
 def find_menu_keywords(text: str) -> list[str]:
-    """문장에 나온 메뉴 단어. 더 긴 단어의 일부면 빼고(타코야끼의 '타코'), 같은 뜻 표기는 하나만 둔다."""
+    """문장에 나온 메뉴 단어. 더 긴 단어의 일부면 빼고(타코야끼의 '타코'), 같은 뜻 표기는 하나만 둔다.
+    음료(커피·차·에이드 …)는 drinks 사전으로 대표 이름을 찾는다 (이슈 #107)."""
+    drink_words = find_drink_keywords(text)
     found = [keyword for keyword in DISH_KEYWORDS if keyword in text]
     found += [dish for alias, dish in MENU_WORD_ALIASES.items() if alias in text and dish not in found]
     result = []
@@ -335,7 +343,7 @@ def find_menu_keywords(text: str) -> list[str]:
             continue
         if keyword not in result:
             result.append(keyword)
-    return result
+    return result + [word for word in drink_words if word not in result]
 
 
 def extract_by_rules(message: str) -> tuple[dict, dict]:
@@ -365,6 +373,17 @@ def extract_by_rules(message: str) -> tuple[dict, dict]:
     tastes, note = extract_tastes(text)
     if note:
         notes["taste_preferences"] = note
+    # 음료 주문 (이슈 #107): '따뜻한 라떼'의 '따뜻한'은 국물이 아니라 온도, 'N잔'은 수량
+    drinks_found = find_drink_keywords(text)
+    if drinks_found:
+        tastes = [t for t in tastes if t not in ("SOUP", "COLD")]
+        cups = find_cups(text)
+        if cups is not None:
+            people = cups
+            notes["people"] = f"'{cups}잔' → people {cups}"
+            budget, note = extract_budget(text, people)
+            if note:
+                notes["budget_krw"] = note
 
     excluded = extract_excluded_ingredients(text)
 
@@ -376,6 +395,9 @@ def extract_by_rules(message: str) -> tuple[dict, dict]:
     cuisine, note = find_cuisine(cleaned)
     if note:
         notes["cuisine"] = note
+    if cuisine is None and drinks_found:
+        cuisine = "카페/디저트"
+        notes["cuisine"] = f"'{drinks_found[0]}' → cuisine 카페/디저트"
 
     constraints = {
         "budget_krw": budget,
@@ -410,6 +432,9 @@ TASTE_HINTS = {
     "CRISPY": re.compile(r"바삭|튀|겉바|크리스피|크런치"),
     "LIGHT": re.compile(r"담백|가벼|가볍|건강|깔끔|다이어트|편한|자극적이지"),
     "CHEESY": re.compile(r"치즈|크림|꾸덕|고소|느끼|진한|크리미"),
+    "NOODLE": TASTE_TRIGGERS["NOODLE"],
+    "RICE": TASTE_TRIGGERS["RICE"],
+    "COLD": TASTE_TRIGGERS["COLD"],
 }
 # 메뉴 검색어로 쓰면 안 되는 일반 단어 ('국물'을 검색어로 쓰면 '국물통뼈닭발'만 찾게 된다)
 GENERIC_MENU_WORDS = {"음식", "메뉴", "거", "것", "식사", "밥", "요리", "국물", "배달", "아무거나", "야식", "간식",
@@ -454,6 +479,9 @@ def grounded_menu_keywords(text: str, words: list[str]) -> list[str]:
     for word in words:
         word = str(word).strip()
         if len(word) < 2 or word not in text:
+            continue
+        if is_drink_keyword(word):  # '커피'는 음식 종류(카페/디저트)이면서 메뉴이기도 하다 (이슈 #107)
+            result.append(word)
             continue
         if word in GENERIC_MENU_WORDS or _is_taste_word(word) or _is_cuisine_word(word):
             continue

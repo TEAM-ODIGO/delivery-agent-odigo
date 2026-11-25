@@ -244,7 +244,7 @@ class FakeOrdering:
                         "name": ln["menu"].name,
                         "description": ln["menu"].description,
                         "quantity": ln["quantity"],
-                        "unit_price_krw": ln["menu"].price_krw,
+                        "unit_price_krw": ln.get("unit_price_krw", ln["menu"].price_krw),
                         "options": [
                             {"option_id": o.option_id, "price_krw": o.price_krw}
                             for o in ln["options"]
@@ -266,6 +266,52 @@ class FakeOrdering:
         }
         p["target"] = target
         res = {"approval_target": target, "next_action": "REQUEST_D_APPROVAL"}
+        self.idem[idempotency_key] = res
+        return res
+
+    # --- B-10 (로컬 확장, #86): 요기요 장바구니 가격으로 재견적 -------------------------------
+    def requote(
+        self, order_plan_id: str, body: dict[str, Any], *, idempotency_key: str
+    ) -> dict[str, Any]:
+        if idempotency_key in self.idem:
+            return self.idem[idempotency_key]
+        p = self._plan(order_plan_id)
+        if (
+            body["base_order_version"] != p["order_version"]
+            or body["quote_id"] != p["quote"]["quote_id"]
+        ):
+            raise _err(409, "VERSION_CONFLICT", "현재 주문안과 버전이 다릅니다.")
+        prices = {str(m["menu_id"]): m["unit_price_krw"] for m in body.get("menu_prices") or []}
+        subtotal = 0
+        for ln in p["lines"]:
+            if ln["menu"].menu_id in prices:
+                ln["unit_price_krw"] = prices[ln["menu"].menu_id]
+            unit = ln.get("unit_price_krw", ln["menu"].price_krw)
+            subtotal += (unit + sum(o.price_krw for o in ln["options"])) * ln["quantity"]
+        old = p["quote"]
+        fee = old["delivery_fee_krw"] if body.get("delivery_fee_krw") is None else body["delivery_fee_krw"]
+        p["order_version"] += 1
+        p["quote"] = {
+            **old,
+            "quote_id": "QT" + uuid.uuid4().hex[:8].upper(),
+            "menu_subtotal_krw": subtotal,
+            "delivery_fee_krw": fee,
+            "pre_financial_amount_krw": subtotal + fee,
+            "expires_at": (self.now() + timedelta(minutes=30)).isoformat(),
+        }
+        p["benefit"], p["target"] = None, None
+        res = {
+            "view": {
+                "order_plan_id": order_plan_id,
+                "order_version": p["order_version"],
+                "validation_status": "VALID",
+                "quote_status": "ACTIVE",
+                "quote": dict(p["quote"]),
+            },
+            "previous_quote_id": old["quote_id"],
+            "invalidated_approval_target_ids": [],
+            "next_action": "CALCULATE_BENEFITS",
+        }
         self.idem[idempotency_key] = res
         return res
 

@@ -42,6 +42,10 @@ class OrderingPort(Protocol):  # B
 
     def check_execution(self, order_plan_id: str, body: Body) -> Body: ...  # B-07
 
+    def requote(
+        self, order_plan_id: str, body: Body, *, idempotency_key: str
+    ) -> Body: ...  # B-10 (로컬 확장, #86)
+
     def record_payment_event(
         self, order_plan_id: str, body: Body, *, idempotency_key: str
     ) -> Body: ...  # B-08
@@ -133,6 +137,28 @@ class HttpPaymentPort:
 
     def get_refund(self, payment_id: str, refund_id: str) -> Body:
         return self._send("GET", f"/payments/{payment_id}/refunds/{refund_id}")
+
+    # ---- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전). 가짜 E(FakePayment)에는 없다 ----
+    def card_catalog(self) -> Body:
+        return self._send("GET", "/internal/card-catalog")
+
+    def list_card_registrations(self, user_id: str) -> Body:
+        return self._send("GET", "/internal/card-registrations", params={"user_id": user_id})
+
+    def create_mydata_consent(self, user_id: str) -> Body:
+        return self._send("POST", "/internal/mock-mydata/consents", json={"user_id": user_id})
+
+    def list_mydata_cards(self, user_id: str, consent_id: str) -> Body:
+        return self._send("GET", "/internal/mock-mydata/cards",
+                          params={"user_id": user_id, "consent_id": consent_id})
+
+    def register_card(self, body: Body) -> Body:
+        return self._send("POST", "/internal/payment-methods", json=body)
+
+    def remove_card(self, user_id: str, payment_method_id: str) -> Body:
+        return self._send(
+            "DELETE", f"/internal/payment-methods/{payment_method_id}", params={"user_id": user_id}
+        )
 
     def get_by_execution(self, execution_id: str) -> Body:
         try:

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Step } from "../api/types";
+import TopBar from "./TopBar";
 
 export function Screen({
   title,
@@ -21,6 +22,7 @@ export function Screen({
   return (
     <div className="screen">
       <header className="screen-head">
+        <TopBar />
         <h1>
           {back && (
             <button className="back" onClick={back} aria-label="뒤로">
@@ -101,6 +103,28 @@ export function Spinner({ label }: { label: string }) {
     <div className="spinner-wrap" role="status">
       <div className="spinner" />
       <p>{label}</p>
+    </div>
+  );
+}
+
+// 오래 걸리는 작업(요기요 장바구니 담기, 요기요 실시간 확인 등)을 기다리는 동안 화면 전체를 덮는 움직이는 오디고 로봇
+// src: 화면마다 다른 로봇 그림 (기본은 봉투를 든 로봇, 후보 화면은 UFO 탄 로봇)
+export function RobotOverlay({
+  label,
+  src = "/images/odigo-loading.webp",
+  children,
+}: {
+  label: string;
+  src?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="robot-overlay" role="status" aria-live="polite">
+      <div className="robot-loader">
+        <img src={src} alt="" width={220} height={220} />
+        <span>{label}</span>
+        {children}
+      </div>
     </div>
   );
 }

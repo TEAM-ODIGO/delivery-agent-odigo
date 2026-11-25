@@ -45,6 +45,8 @@ class _RealBenefit:
     list_methods = staticmethod(benefit_facade.list_payment_methods)
     check_min_order = staticmethod(benefit_facade.check_min_order)  # 로컬 확장
     card_dashboard = staticmethod(benefit_facade.card_dashboard)  # 로컬 확장: 카드 혜택 화면
+    record_usage = staticmethod(benefit_facade.record_usage)  # 로컬 확장: 결제 승인 → 이번 달 받은 혜택 기록
+    reverse_usage = staticmethod(benefit_facade.reverse_usage)  # 로컬 확장: 환불 → 되돌림
 
 
 def _d_benefit_port() -> CBenefitPort:
@@ -141,7 +143,7 @@ class _ScenarioOrdering:
                     {
                         "code": "MENU_SOLD_OUT",
                         "menu_id": it.get("menu_id"),
-                        "message": "품절 (#시연)",
+                        "message": "품절",
                     }
                     for it in body.get("items", [])
                 ],

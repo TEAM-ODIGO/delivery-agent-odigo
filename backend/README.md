@@ -70,12 +70,50 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 - 모드는 `.env`의 `YOGIYO_CART_MODE`로 고른다 (`.env.example` 참고).
   - `fake`(기본): Playwright 없이 견적대로 담긴 것처럼 응답. 주문 문장에 `#요기요불일치`·`#요기요실패`를 넣으면 그 결과를 시연한다.
   - `real`: 진짜 요기요를 연다. 따로 설치할 것은 없다: Playwright는 `uv sync`로 설치되고, 크로미움 브라우저는 첫 담기 때 자동으로 받는다 (처음 한 번 1~2분). 설치된 Chrome을 쓰려면 `YOGIYO_CART_BROWSER=chrome`. 요기요 창이 뜨고(`YOGIYO_CART_HEADLESS=0`, 기본), 새 주문을 시작할 때까지 열려 있다 (`YOGIYO_CART_KEEP_BROWSER=1`, 기본). 다시 담기를 누르면 창을 새로 열어 처음부터 담는다.
+  - `remote`: 배포 서버용. 서버는 작업을 `QUEUED`로 쌓아 두고, 한국 PC의 작업기가 가져가서 진짜 요기요에 담는다 (아래 "배포 환경에서 진짜 요기요 담기").
   - `off`: 버튼을 누르면 503 `CART_DISABLED`.
 - 창 없는(headless) 브라우저는 요기요가 "Access Denied"로 막는다. 그래서 창을 띄우는 모드만 쓰고, 막히면 그 이유를 실패 사유로 알려 준다 (우회하지 않음).
 - 서버 없이 Playwright만 확인: `uv run python scripts/yogiyo_cart_try.py --find-open` (지금 열린 식당을 찾아 담기). 식당을 정하려면 `--restaurant`·`--item`, 열리는지만 보려면 `--check-only`.
 - 지금 요기요 주문을 받지 않는 가게("요기요 서비스가 제공되지 않습니다")는 바로 실패로 알려 준다.
 - 담긴 장바구니 원본은 캡처 옆 `{작업id}-cart.json`에 남는다 (요기요 형식이 바뀌었을 때 확인용).
 - 요기요 장바구니는 그 브라우저 탭 안에만 있다. 창을 닫으면 사라지므로 화면에는 캡처로 남긴다.
+
+### 배포 환경에서 진짜 요기요 담기 (remote 모드, PC 작업기)
+
+배포 서버(EC2, 해외 클라우드 IP)에서 요기요를 열면 창을 띄워도 Access Denied로 막힌다.
+우회하지 않고, 한국 PC가 대신 담는다.
+
+```
+휴대폰 → 배포 사이트 → 서버: 담기 작업 QUEUED
+                        ↑ 2초마다 확인(claim)        ↓ 결과·캡처 업로드
+               한국 PC 작업기 (scripts/cart_worker.py) → 요기요 (창을 띄운 크로미움)
+```
+
+- 서버 `.env`: `YOGIYO_CART_MODE=remote` (재시작 필요: `sudo systemctl restart odigo-backend`)
+- PC에서 작업기 실행 (backend 폴더):
+  `uv run python scripts/cart_worker.py --server https://<배포 주소> --token <서버의 INTERNAL_SERVICE_TOKEN>`
+  (또는 `.env`에 `YOGIYO_WORKER_SERVER`·`YOGIYO_WORKER_TOKEN`을 넣고 `uv run --env-file .env python scripts/cart_worker.py`)
+- 작업기 API (서비스 토큰 필요, 화면은 부르지 않음): `POST /orchestrator/cart-worker/jobs/claim` (작업 없으면 204),
+  `POST /orchestrator/cart-worker/jobs/{job_id}/result` (이미 끝난 작업이면 409 `CART_JOB_CLOSED`)
+- 작업기가 꺼져 있으면: `YOGIYO_CART_REMOTE_WAIT_SECONDS`(30초) 안에 아무도 안 가져가거나,
+  `YOGIYO_CART_REMOTE_TIMEOUT_SECONDS`(180초) 안에 결과가 없으면 시연 모드(fake)로 마무리한다 (`mode: fake`, `error`에 사유).
+  결제 승인이 "확인 중"에서 멈추지 않게 하려는 것이다.
+- 장바구니는 PC에 뜬 크로미움 창 안에만 있다. 휴대폰 화면에는 담긴 메뉴·금액·캡처가 보인다 (요기요 앱 장바구니와 연동되지 않음).
+
+#### 후보 실시간 확인도 PC 작업기로 (`LIVE_CHECK_MODE=remote`, 이슈 #80)
+
+배포 서버에서 `real`로 두면 요기요가 막아 후보가 모두 "요기요 확인 못 함"이 되고, `fake`면 실제로 확인하지 않는다.
+그래서 "요기요 서비스 미제공" 가게가 후보 단계에서 걸러지지 않고 장바구니 담기에서야 드러났다.
+`remote`로 두면 같은 PC 작업기가 후보 식당도 확인한다 (작업기 실행 방법은 위와 같다, 따로 켤 것 없음).
+
+- 서버 `.env`: `LIVE_CHECK_MODE=remote` (재시작 필요)
+- 작업기는 확인 작업을 담기 작업보다 먼저 처리한다 (후보 화면이 기다리는 작업). 판정 규칙·15분 캐시는 real과 같다.
+  서버가 최근 15분 안에 확인한 식당은 작업에 `cached`로 실어 보내 작업기가 다시 열지 않는다.
+- 작업기 API: `POST /orchestrator/cart-worker/live-checks/claim` (없으면 204),
+  `POST /orchestrator/cart-worker/live-checks/{job_id}/result` (끝났거나 시간이 지난 작업이면 409 `JOB_NOT_ACTIVE`)
+- 작업기가 꺼져 있으면: `LIVE_CHECK_REMOTE_WAIT_SECONDS`(20초) 안에 안 가져가거나 `LIVE_CHECK_REMOTE_TIMEOUT_SECONDS`(90초) 안에
+  결과가 없으면 후보는 "요기요 확인 못 함"으로 넘어가고 고를 수 있다 (기존 규칙과 같음).
+- 확인 작업은 서버 프로세스 메모리에 둔다 (서버를 재시작하면 진행 중인 확인은 "확인 못 함"으로 끝난다).
 
 ## 관리자 대시보드 (O-17 ~ O-20, 이슈 #46)
 
@@ -101,7 +139,7 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 후보를 보여 줄 때(CANDIDATES_READY) 상위 후보가 지금 요기요에서 주문 가능한지 백그라운드로 확인한다.
 장바구니에는 담지 않고 식당 페이지만 읽는다. 후보 화면은 확인을 기다리지 않는다.
 
-- A-05에서 후보를 `LIVE_CHECK_TOP_N`(6)곳 받고, 순위대로 확인하다 통과가 `LIVE_CHECK_WANT`(3)곳이면 멈춘다.
+- A-05에서 후보를 `LIVE_CHECK_TOP_N`(9)곳 받고, 순위대로 확인하다 통과가 `LIVE_CHECK_WANT`(5)곳이면 멈춘다. 후보 화면에는 고를 수 있는 가게가 `WANT`곳 보인다.
 - 판정: `OK` · `CHANGED`(가격·배달비·최소 주문 금액·메뉴 번호만 다름, 고를 수 있음) · `UNAVAILABLE`(서비스 미제공·메뉴 없음·품절·페이지 안 열림, 고를 수 없음) · `BLOCKED` · `ERROR` · `CHECKING` · `SKIPPED`
 - `GET /orchestrator/runs/{request_id}/live-check` (O-15): 후보별 결과와 진행률. `visible`은 화면에 보일 후보(고를 수 있는 후보가 `WANT`곳 나올 때까지 순위대로), `selectable`은 고를 수 있는지. 주문 불가 후보는 숨기지 않고 사유와 함께 비활성으로 보인다.
 - `POST /orchestrator/runs/{request_id}/live-check` (O-16): 다시 확인 (후보 선택 단계에서만).
@@ -155,7 +193,7 @@ A-05는 `data/1_식당.csv`의 `영업시간` 열(예: `17:00 ~ 03:00`)을 보�
   ```bash
   uv run python scripts/eval_recommend.py                        # 문장별 결과 + 요약
   uv run python scripts/eval_recommend.py --save before.json     # 저장 → 코드 바꾼 뒤 --compare before.json
-  uv run python scripts/compare_llm.py                           # 규칙 vs LLM(Ollama) 조건 추출 비교
+  uv run --env-file .env python scripts/compare_llm.py           # 규칙 vs LLM 조건 추출 비교
   ```
 
 ## 시연 전 데이터 새로 고치기 (식당·메뉴 재수집)
@@ -204,6 +242,31 @@ uv run python scripts/collect_catalog.py --write             # 방금 읽은 결
 - 디저트 단어(케이크·마카롱·와플·크로플·도넛·탕후루·요거트·크레페 등)는 카페/디저트 가게에서 찾는다.
 - '베라'·'배스킨'은 아이스크림, '설빙'은 빙수로 알아듣는다. 배스킨라빈스처럼 메뉴 이름에 '아이스크림'이 없어도
   '레디팩'·'파인트' 같은 이름으로 찾는다 (`constants.MENU_WORD_ALIASES`·`MENU_NAME_ALIASES`).
+
+## LLM: OpenRouter (이슈 #62)
+
+A의 조건 추출은 규칙이 먼저이고, LLM은 규칙이 비운 칸만 문장에 근거가 있을 때 채운다. LLM이 꺼져 있거나 실패해도 규칙으로 동작한다.
+기본 제공자는 OpenRouter API다 (OpenAI 방식, 모델은 설정으로 바꾼다). 로컬 Ollama도 `LLM_PROVIDER=ollama`로 그대로 쓸 수 있다.
+
+```bash
+# .env
+LLM_ENABLED=true
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...        # https://openrouter.ai/keys (커밋 금지, 키에 사용 한도 걸기)
+OPENROUTER_MODEL=kt/midm-k-3.0-pro          # 비교에서 가장 빠름 (코드 기본값은 openai/gpt-4.1-mini)
+OPENROUTER_FALLBACK_MODELS=openai/gpt-4.1-mini  # 주 모델이 오류를 내면 대신 (기본값)
+```
+
+- 대체 모델: 주 모델이 오류(서비스 중단·요청 제한 등)를 내면 OpenRouter가 `OPENROUTER_FALLBACK_MODELS`를 순서대로 시도한다 (요청은 한 번). 실제로 답한 모델이 `a_llm_call`에 남고, 대체됐으면 `(대체)`가 붙는다.
+- 느릴 때는 대체되지 않는다. `LLM_TIMEOUT_SECONDS`(기본 8초)가 지나면 규칙으로 넘어간다.
+
+- 확인: `curl localhost:8000/discovery/health` → `"llm": "UP"` (키가 맞는지만 보고 모델은 부르지 않는다). `NO_API_KEY`·`INVALID_KEY`·`DOWN`이면 규칙만 쓴다.
+- 조건 추출은 JSON 스키마를 강제하는 구조화 출력(`response_format: json_schema`, `provider.require_parameters`)으로 부른다.
+- 오류: 401·402(잔액 부족)·403은 바로 규칙으로, 429·5xx·깨진 JSON·시간 초과는 한 번 더 시도한다. 모든 호출은 `a_llm_call`에 남는다 (키는 남기지 않음).
+- 외부로 보내는 것은 주문 문장(과 추천 이유를 켰을 때 후보 사실 문장)뿐이다. 배달 주소·사용자 ID는 보내지 않는다.
+- 모델 고르기: `uv run --env-file .env python scripts/compare_llm.py --models openai/gpt-4.1-mini,openai/gpt-5-mini` → 모델별 실패 수·시간·조건 추출 결과를 나란히 보여 준다 (`cart_runs/compare-models-*.md`). 비용은 OpenRouter 대시보드에서 본다.
+- 배포 서버: EC2의 `.env`(배포 스크립트가 읽는 파일)에 위 네 줄을 직접 넣는다. GitHub에는 올리지 않는다.
+- CI·테스트는 실제 OpenRouter를 부르지 않는다 (`tests/discovery/test_openrouter.py`는 가짜 응답).
 
 ## C(혜택)와 함께 확인
 

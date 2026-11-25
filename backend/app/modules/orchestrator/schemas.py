@@ -82,12 +82,28 @@ class CancelReply(Strict):
     expected_state_version: Version
 
 
+class RecommendAgainReply(Strict):
+    """후보 화면에서 '다시 추천' (로컬 확장, 이슈 #68): 지금까지 보여 준 가게를 빼고 다시 찾는다."""
+
+    type: Literal["RECOMMEND_AGAIN"]
+    expected_state_version: Version
+
+
+class RequoteFromCartReply(Strict):
+    """승인 화면 (로컬 확장, 이슈 #86): 요기요 장바구니 금액이 견적과 다르면 그 금액으로 견적·승인을 다시 만든다."""
+
+    type: Literal["REQUOTE_FROM_CART"]
+    expected_state_version: Version
+
+
 Reply = Annotated[
     ClarificationReply
     | SelectCandidateReply
     | SelectPaymentMethodReply
     | ApproveReply
-    | CancelReply,
+    | CancelReply
+    | RecommendAgainReply
+    | RequoteFromCartReply,
     Field(discriminator="type"),
 ]
 
@@ -104,6 +120,40 @@ class RefundCreate(Strict):
 
     payment_method_id: Id  # 지금 보고 있는 카드. 이 카드의 결제가 맞는지 확인한다
     reason: Annotated[str, Field(max_length=300)] | None = None
+
+
+# ---------------- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전) ----------------
+class CardAdd(Strict):
+    """내 결제수단에 카드 한 장을 넣는다 (user_id는 토큰에서).
+    카드 번호 전체·유효기간·CVC는 받지 않는다.
+
+    MANUAL: product_id(혜택 규칙이 있는 카드)를 고르거나 name을 직접 적는다(혜택 규칙 없음).
+    MYDATA: 모의 마이데이터에서 고른 카드. consent_id와 mydata_card_id가 필요하다.
+    """
+
+    source: Literal["MANUAL", "MYDATA"]
+    product_id: Id | None = None
+    name: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    issuer: Annotated[str, Field(min_length=1, max_length=20)] | None = None
+    last4: Annotated[str, Field(pattern=r"^[0-9]{4}$")] | None = None
+    consent_id: Id | None = None
+    mydata_card_id: Id | None = None
+
+    @model_validator(mode="after")
+    def _by_source(self):
+        if self.source == "MANUAL":
+            if self.consent_id is not None or self.mydata_card_id is not None:
+                raise ValueError("직접 입력에는 consent_id·mydata_card_id를 보낼 수 없습니다.")
+            if self.product_id is None and self.name is None:
+                raise ValueError("product_id나 name 중 하나는 있어야 합니다.")
+            if self.product_id is not None and (self.name is not None or self.issuer is not None):
+                raise ValueError("product_id를 고르면 name·issuer는 보낼 수 없습니다.")
+        else:
+            if self.consent_id is None or self.mydata_card_id is None:
+                raise ValueError("마이데이터에는 consent_id와 mydata_card_id가 필요합니다.")
+            if any(v is not None for v in (self.product_id, self.name, self.issuer, self.last4)):
+                raise ValueError("마이데이터에는 카드 정보를 따로 보낼 수 없습니다.")
+        return self
 
 
 class ShownCandidate(Strict):

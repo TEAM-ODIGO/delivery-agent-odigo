@@ -46,11 +46,13 @@ from app.modules.delegation.schemas import (
 )
 from app.modules.orchestrator import admin
 from app.modules.orchestrator.constants import (
+    CANDIDATES_SHOWN,
     FINAL,
     PAYMENT_STARTED,
     STEPS,
     TOTAL_STEPS,
     WAITING,
+    YOGIYO_STORE_URL,
     FailCode,
     ReplyType,
     RunEventType,
@@ -65,7 +67,7 @@ from app.modules.orchestrator.ports import (
     PaymentResponseLost,
     RecommendationPort,
 )
-from app.modules.orchestrator.schemas import RefundCreate, RunCreate
+from app.modules.orchestrator.schemas import CardAdd, RefundCreate, RunCreate
 
 CATALOG_VERSION = "CAT-V1"
 TRANSIENT = (TimeoutError, ConnectionError, httpx.TransportError)
@@ -129,7 +131,7 @@ class OrchestratorService:
             state=RunState.RECEIVED,
             state_version=0,
             message=body.message,
-            delegation=body.delegation.model_dump(mode="json"),
+            delegation=self._with_search(body.delegation.model_dump(mode="json")),
             context={},
             event_seq=0,
             created_at=now,
@@ -197,6 +199,8 @@ class OrchestratorService:
             ReplyType.SELECT_PAYMENT_METHOD: self._on_select_payment_method,
             ReplyType.APPROVE: self._on_approve,
             ReplyType.CANCEL: self._on_cancel,
+            ReplyType.RECOMMEND_AGAIN: self._on_recommend_again,
+            ReplyType.REQUOTE_FROM_CART: self._on_requote_from_cart,
         }[rtype]
         try:
             handler(run, payload)
@@ -330,16 +334,20 @@ class OrchestratorService:
         if not found.get("matched"):
             raise AppError(404, found.get("reason_code") or "NFC_CARD_NOT_REGISTERED",
                            found.get("message") or "등록되지 않은 NFC 카드예요.")
-        payment_method_id = found["payment_method_id"]
-        summarize = getattr(self.c, "card_dashboard", None)
-        if summarize is None:
-            raise AppError(503, "CARD_DASHBOARD_UNAVAILABLE", "지금은 카드 혜택을 불러올 수 없어요.")
         try:
-            summary = summarize(user_id, payment_method_id)
+            return self.payment_method_dashboard(user_id, found["payment_method_id"])
         except AppError as exc:
             if exc.code == "PAYMENT_METHOD_NOT_FOUND":  # 다른 사람 카드: 존재 여부를 알려 주지 않는다
                 raise AppError(403, "NFC_CARD_NOT_MINE", "내 결제수단에 등록된 카드가 아니에요.") from exc
             raise
+
+    def payment_method_dashboard(self, user_id: str, payment_method_id: str) -> dict:
+        """내 결제수단 하나의 혜택 화면 (로컬 확장): C의 혜택 요약 + E의 최근 결제 3건. 읽기 전용.
+        NFC 태그(card_dashboard)와 설정 화면의 ⋮ 버튼이 같이 쓴다. 내 결제수단이 아니면 404."""
+        summarize = getattr(self.c, "card_dashboard", None)
+        if summarize is None:
+            raise AppError(503, "CARD_DASHBOARD_UNAVAILABLE", "지금은 카드 혜택을 불러올 수 없어요.")
+        summary = summarize(user_id, payment_method_id)
         payments = self._card_port("list_card_payments")(user_id, payment_method_id, 3)
         recent = [self._recent_payment(user_id, p) for p in payments.get("items", [])]
         return {**summary, "recent_payments": recent}
@@ -366,7 +374,68 @@ class OrchestratorService:
                 refund = self._card_port("get_refund")(payment_id, refund["refund_id"])
             except AppError:
                 pass  # 결과 확인만 실패: 접수된 상태(PENDING)로 돌려준다
+        if refund.get("status") == "REFUNDED":  # 남은 금액 전부를 돌려줬으니 그 결제로 받은 혜택도 되돌린다
+            reverse = getattr(self.c, "reverse_usage", None)
+            if reverse is not None:
+                try:
+                    reverse(payment_id)
+                except Exception:  # noqa: BLE001 - 환불 결과를 막지 않는다
+                    pass
         return {"payment_id": payment_id, **refund}
+
+    # ================================================================ 내 카드 추가 (로컬 확장, 팀 합의 전)
+    def my_cards(self, user_id: str) -> dict:
+        """내 결제수단 목록 + 카드마다 어떻게 들어왔는지(직접 추가·마이데이터)와 뺄 수 있는지.
+        결제수단은 C-02, 등록 정보는 E. E 등록 정보를 못 읽어도 목록은 그대로 보여 준다."""
+        res = self.c.list_methods(user_id)
+        registered: dict[str, dict] = {}
+        lookup = getattr(self.e, "list_card_registrations", None)
+        if lookup is not None:
+            try:
+                registered = {r["payment_method_id"]: r for r in lookup(user_id).get("results", [])}
+            except AppError:
+                registered = {}
+        results = []
+        for m in res.get("results", []):
+            reg = registered.get(m["payment_method_id"])
+            results.append({
+                "payment_method_id": m["payment_method_id"],
+                "name": m.get("name"),
+                "type": m.get("type"),
+                "status": m.get("status", "ACTIVE"),
+                "product_id": m.get("product_id"),
+                "has_benefit_rule": m.get("has_benefit_rule", True),
+                "balance_krw": m.get("balance_krw"),
+                "monthly_performance_krw": m.get("monthly_performance_krw"),
+                "monthly_benefit_remaining_krw": m.get("monthly_benefit_remaining_krw"),
+                "source": reg["source"] if reg else None,
+                "last4": reg.get("last4") if reg else None,
+                "removable": reg is not None,
+            })
+        return {"count": len(results), "results": results, "can_add": hasattr(self.e, "register_card")}
+
+    def my_card_catalog(self) -> dict:
+        return self._my_cards_port("card_catalog")()
+
+    def start_mydata(self, user_id: str) -> dict:
+        """모의 마이데이터 정보제공 동의 (진짜 마이데이터가 아니다)."""
+        return self._my_cards_port("create_mydata_consent")(user_id)
+
+    def mydata_cards(self, user_id: str, consent_id: str) -> dict:
+        return self._my_cards_port("list_mydata_cards")(user_id, consent_id)
+
+    def add_card(self, user_id: str, body: CardAdd) -> dict:
+        return self._my_cards_port("register_card")({"user_id": user_id, **body.model_dump(exclude_none=True)})
+
+    def remove_card(self, user_id: str, payment_method_id: str) -> dict:
+        return self._my_cards_port("remove_card")(user_id, payment_method_id)
+
+    def _my_cards_port(self, name: str) -> Callable[..., dict]:
+        fn = getattr(self.e, name, None)
+        if fn is None:
+            # 개발 참고: 결제 서버(E)를 연결해야 쓸 수 있다 (.env의 E_PAYMENT_URL·E_BASE_URL)
+            raise AppError(503, "MY_CARDS_UNAVAILABLE", "지금은 카드를 추가할 수 없어요. 잠시 후 다시 시도해 주세요.")
+        return fn
 
     def _card_port(self, name: str) -> Callable[..., dict]:
         fn = getattr(self.e, name, None)
@@ -397,6 +466,10 @@ class OrchestratorService:
     def admin_summary(self) -> dict:
         """O-17 오늘 운영 개요 + 조치할 주문."""
         return admin.summary(self.session, self.now())
+
+    def admin_events(self, limit: int = admin.EVENT_LIMIT) -> dict:
+        """(로컬 확장, 이슈 #94) 운영 개요의 최근 주문 흐름."""
+        return admin.events(self.session, self.now(), max(1, min(limit, 100)))
 
     def _admin_load(self, request_id: str) -> Run:
         run = self.session.scalars(select(Run).where(Run.request_id == request_id)).first()
@@ -526,6 +599,29 @@ class OrchestratorService:
         cid = cand["candidate_id"]
         rid = run.request_id
         self._check_live(run, cand)
+
+        # '주문안 만들기'를 맡기지 않았으면 추천까지만: 고른 가게를 기록하고 요기요로 넘긴다 (이슈 #111)
+        if not self._allows(run, "BUILD_ORDER"):
+            sel = self._call(run, "A", "A-06", lambda: self.a.select(rid, {"candidate_id": cid}))
+            chosen = sel.get("selected_candidate") or cand
+            self._set_ctx(run, selected_candidate=chosen)
+            restaurant = chosen.get("restaurant") or cand["restaurant"]
+            self._to(
+                run,
+                RunState.RECOMMENDED,
+                prompt=None,
+                result={
+                    "recommendation": {
+                        "restaurant_id": restaurant["restaurant_id"],
+                        "restaurant_name": restaurant.get("name") or cand.get("restaurant_name"),
+                        "items": self._item_views(chosen.get("items") or cand.get("items") or []),
+                        "estimated_total_krw": chosen.get("estimated_total_krw") or cand.get("estimated_total_krw"),
+                        "yogiyo_url": YOGIYO_STORE_URL.format(restaurant_id=restaurant["restaurant_id"]),
+                    }
+                },
+                detail={"reason": "BUILD_ORDER_NOT_DELEGATED"},
+            )
+            return
 
         # 예산 초과 확인(로컬 확장): 사용자가 동의했고 A가 이 후보를 예산 초과로
         # 표시했을 때만 기록한다. 동의는 선택할 때마다 새로 정한다
@@ -832,6 +928,20 @@ class OrchestratorService:
     def _on_approve(self, run: Run, p: dict) -> None:
         ctx = run.context
         rid = run.request_id
+        # '결제 요청'을 맡기지 않았으면 결제하지 않고 주문안을 넘긴다 (이슈 #111). 사용자가 요기요에서 직접 결제
+        if not self._allows(run, "REQUEST_PAYMENT"):
+            restaurant_id = (ctx.get("selected_candidate") or {}).get("restaurant", {}).get("restaurant_id")
+            self._to(
+                run,
+                RunState.HANDED_OFF,
+                prompt=None,
+                result={
+                    "order": self._order_view(run),
+                    "yogiyo_url": YOGIYO_STORE_URL.format(restaurant_id=restaurant_id) if restaurant_id else None,
+                },
+                detail={"reason": "REQUEST_PAYMENT_NOT_DELEGATED"},
+            )
+            return
         if p.get("card_tap") and not ctx.get("execution_id"):
             self._check_card_tap(run, p["card_tap"])  # 다른 카드면 여기서 멈춘다 (결제 시작 전)
         if not ctx.get("execution_id"):
@@ -966,6 +1076,174 @@ class OrchestratorService:
             message = res.get("message") or "결제할 수 없는 카드예요. 다시 태그해 주세요."
             raise AppError(422, code, message, {"payment_method_id": payment_method_id})
 
+    def _on_recommend_again(self, run: Run, p: dict) -> None:
+        """후보 화면 '다시 추천' (로컬 확장, 이슈 #68).
+
+        지금까지 추천한 가게를 모두 빼고 A-05로 다시 찾는다. 새 후보로 같은 후보 화면을 다시 보여 주고
+        요기요 실시간 확인도 새 후보로 다시 한다. 더 찾을 가게가 없으면 지금 후보를 그대로 두고 409로 알린다.
+        """
+        ctx = run.context or {}
+        shown = list(dict.fromkeys(
+            [*ctx.get("recommended_restaurant_ids", []),
+             *[c["restaurant"]["restaurant_id"] for c in ctx.get("candidates", [])]]
+        ))
+        top_n = self.live.cfg.top_n if self.live else CANDIDATES_SHOWN
+        rid = run.request_id
+        found = self._call(
+            run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n, "exclude_restaurant_ids": shown})
+        )
+        if not found.get("candidates"):
+            raise AppError(
+                409,
+                "NO_MORE_CANDIDATES",
+                "더 추천할 가게가 없어요. 지금 후보 중에서 고르거나 조건을 바꿔 다시 주문해 주세요.",
+                {"recommended": len(shown)},
+            )
+        cands = [{**c, "index": i} for i, c in enumerate(found["candidates"])]
+        cands = self._mark_min_order(run, cands, ctx.get("constraints") or {})
+        self._set_ctx(
+            run,
+            candidates=cands,
+            tried_candidate_ids=[],
+            search_notice=found.get("search_notice"),
+            recommended_restaurant_ids=shown,
+            recommend_round=int(ctx.get("recommend_round", 1)) + 1,
+        )
+        if self.live:
+            self._start_live_check(run)
+        self._to(
+            run,
+            RunState.CANDIDATES_READY,
+            prompt=self._candidate_prompt(run),
+            service="A",
+            detail={"api": "A-05", "candidates": len(cands), "recommend_again": True, "excluded": len(shown)},
+        )
+
+    def _latest_cart_job(self, request_id: str):
+        from app.modules.cart.models import CartJob
+
+        # 읽기만 한다: 아직 쓰지 않은 주문 변경을 여기서 flush하면 D(다른 세션)의 쓰기와 잠금이 겹친다
+        with self.session.no_autoflush:
+            return self.session.scalars(
+                select(CartJob)
+                .where(CartJob.request_id == request_id)
+                .order_by(CartJob.created_at.desc())
+                .limit(1)
+            ).first()
+
+    def _on_requote_from_cart(self, run: Run, p: dict) -> None:
+        """승인 화면 (로컬 확장, 이슈 #86): 요기요 장바구니에서 확인한 가격·배달비로 다시 견적을 낸다.
+
+        화면 숫자만 바꾸면 결제 금액(승인 대상)과 달라지므로 B-10 재견적 → C-01 → B-05 → B-06 → D-02를
+        다시 거친다. 메뉴·수량이 다르면(담기 자체가 다름) 금액만 바꿀 수 없어 거절한다. 결제수단은 그대로.
+        """
+        ctx = run.context
+        job = self._latest_cart_job(run.request_id)
+        if job is None or job.status != "CART_MISMATCH":
+            raise AppError(
+                409, "CART_NOT_MISMATCH", "요기요 장바구니 금액이 견적과 다를 때만 다시 계산할 수 있어요."
+            )
+        if ctx.get("requote", {}).get("cart_job_id") == job.job_id:
+            raise AppError(409, "ALREADY_REQUOTED", "이미 요기요 금액으로 다시 계산했어요.")
+        q = ctx["target_quote"]
+        cart = {str(i.get("menu_id")): i for i in job.cart_items or []}
+        if {str(i["menu_id"]): i["quantity"] for i in q["items"]} != {
+            k: v.get("quantity") for k, v in cart.items()
+        }:
+            raise AppError(
+                409,
+                "CART_ITEMS_DIFFER",
+                "요기요에 담긴 메뉴·수량이 주문안과 달라 금액만 바꿀 수 없어요. 다시 담거나 주문을 취소해 주세요.",
+            )
+        prices, changes = [], []
+        for it in q["items"]:
+            new = cart[str(it["menu_id"])].get("unit_price_krw")
+            if new is not None and new != it["unit_price_krw"]:
+                prices.append({"menu_id": str(it["menu_id"]), "unit_price_krw": new})
+                changes.append(
+                    {"kind": "MENU_PRICE", "name": it.get("name"), "from_krw": it["unit_price_krw"], "to_krw": new}
+                )
+        fee = job.delivery_fee_krw
+        if fee is not None and fee != q["delivery_fee_krw"]:
+            changes.append({"kind": "DELIVERY_FEE", "name": "배달비", "from_krw": q["delivery_fee_krw"], "to_krw": fee})
+        else:
+            fee = None
+        if not changes:
+            raise AppError(409, "NOTHING_TO_REQUOTE", "요기요 금액이 견적과 같아 다시 계산할 것이 없어요.")
+
+        previous = {
+            "charge_krw": q["charge_krw"],
+            "menu_subtotal_krw": q["menu_subtotal_krw"],
+            "delivery_fee_krw": q["delivery_fee_krw"],
+            "instant_discount_krw": q.get("instant_discount_krw") or 0,
+        }
+        pm = ctx["payment_method_id"]
+        local_amount = q.get("local_currency_amount_krw")
+        rid, plan_id, ver = run.request_id, ctx["order_plan_id"], ctx["order_version"]
+        try:
+            res = self._call(
+                run,
+                "B",
+                "B-10",
+                lambda: self.b.requote(
+                    plan_id,
+                    {
+                        "base_order_version": ver,
+                        "quote_id": ctx["quote"]["quote_id"],
+                        "source": "YOGIYO_CART",
+                        "menu_prices": prices,
+                        "delivery_fee_krw": fee,
+                    },
+                    idempotency_key=f"{rid}:b10:{ver}",
+                ),
+            )
+            view = res["view"]
+            self._set_ctx(
+                run,
+                order_version=view["order_version"],
+                quote=view["quote"],
+                requote={"cart_job_id": job.job_id, "previous": previous, "changes": changes},
+            )
+            rec = self._call(
+                run,
+                "C",
+                "C-01",
+                lambda: self.c.recommend(
+                    self._c01_body(run, view["quote"]),
+                    idempotency_key=self._c01_key(run, view["quote"]),
+                ),
+            )
+            if not any(o["payment_method_id"] == pm for o in rec.get("options", [])):
+                self._block(
+                    run,
+                    ["PAYMENT_METHOD_NOT_AVAILABLE"],
+                    {"message": "요기요 금액으로 다시 계산하니 고른 결제수단을 쓸 수 없어요. 다시 주문해 주세요."},
+                    service="C",
+                )
+                return
+            self._set_ctx(
+                run,
+                recommendation={
+                    "recommendation_id": rec["recommendation_id"],
+                    "benefit_rule_version": rec["benefit_rule_version"],
+                    "expires_at": rec.get("expires_at"),
+                    "options": rec["options"],
+                    "excluded": rec.get("excluded", []),
+                },
+            )
+            self._on_select_payment_method(
+                run,
+                {"payment_method_id": pm, **({"local_currency_amount_krw": local_amount} if local_amount else {})},
+            )
+        except AppError as exc:
+            # B 재견적은 이미 끝났을 수 있다 → 예전 승인 화면에 머물지 않고 멈춘다 (결제하지 않음)
+            self._block(
+                run,
+                [exc.code],
+                {"message": "요기요 금액으로 다시 계산하지 못했어요. 주문을 취소하고 다시 주문해 주세요."},
+                service="B",
+            )
+
     def _on_cancel(self, run: Run, p: dict) -> None:
         approval_id = run.context.get("approval_id")
         if approval_id:
@@ -1026,7 +1304,7 @@ class OrchestratorService:
         )
         self._set_ctx(run, policy_id=policy["policy_id"], policy_version=policy["policy_version"])
 
-        top_n = self.live.cfg.top_n if self.live else 3
+        top_n = self.live.cfg.top_n if self.live else CANDIDATES_SHOWN
         found = self._call(run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n}))
         cands = [{**c, "index": i} for i, c in enumerate(found.get("candidates", []))]
         cands = self._mark_min_order(run, cands, a["constraints"])
@@ -1074,6 +1352,7 @@ class OrchestratorService:
             ]
         result["order"] = self._order_view(run)
         if status == "APPROVED":
+            self._record_benefit_usage(run, res)
             self._to(run, RunState.COMPLETED, prompt=None, result=result, service="E")
         elif status == "FAILED":
             self._to(
@@ -1109,6 +1388,28 @@ class OrchestratorService:
                 result=result,
                 service="E",
                 detail={"execution_id": exe},
+            )
+
+    def _record_benefit_usage(self, run: Run, res: dict) -> None:
+        """결제가 승인되면 받은 할인액을 C의 '이번 달 받은 혜택'에 더한다 (로컬 확장, 팀 합의 전).
+
+        분할결제여도 할인은 카드 몫에만 붙는다(충전식 지역화폐는 할인이 없다) → 카드 기준으로 기록한다.
+        같은 payment_id는 C가 한 번만 반영하므로 reconcile이 다시 불러도 안전하다.
+        C가 이 기능을 모르거나(가짜 C) 실패해도 결제 결과는 그대로 둔다.
+        """
+        record = getattr(self.c, "record_usage", None)
+        q = run.context.get("target_quote") or {}
+        amount = q.get("instant_discount_krw") or 0
+        if record is None or not res.get("payment_id") or amount <= 0:
+            return
+        try:
+            record(res["payment_id"], q["payment_method_id"], amount)
+        except Exception as exc:  # noqa: BLE001 - 남은 혜택 표시용 누적일 뿐
+            self._event(
+                run,
+                RunEventType.SERVICE_ERROR,
+                service="C",
+                detail={"api": "C-USAGE", "code": getattr(exc, "code", type(exc).__name__)},
             )
 
     def _record_payment_result(self, run: Run, res: dict) -> None:
@@ -1425,6 +1726,14 @@ class OrchestratorService:
             if state in FINAL:
                 raise self._state_conflict(run, "이미 끝난 주문입니다.")
             return
+        if rtype == ReplyType.REQUOTE_FROM_CART:  # 승인 화면, 결제 시작 전에만 (이슈 #86)
+            if state != RunState.AWAITING_APPROVAL or (run.context or {}).get("execution_id"):
+                raise self._state_conflict(run, "요기요 금액 반영은 결제 승인 전에만 할 수 있습니다.")
+            return
+        if rtype == ReplyType.RECOMMEND_AGAIN:  # 후보 화면에서만 (이슈 #68)
+            if state != RunState.CANDIDATES_READY:
+                raise self._state_conflict(run, "다른 가게 추천은 후보 화면에서만 받을 수 있습니다.")
+            return
         if WAITING.get(state) != rtype:
             raise self._state_conflict(run, f"지금은 {rtype} 응답을 받을 수 없습니다.")
 
@@ -1579,7 +1888,8 @@ class OrchestratorService:
     def _check_live(self, run: Run, cand: dict) -> None:
         """고른 후보가 요기요에서 지금 주문 불가로 확인됐으면 거절한다 (409 CANDIDATE_UNAVAILABLE).
 
-        확인 중이면 그 식당 확인이 끝날 때까지 잠깐 기다린다. 확인하지 못한 후보는 막지 않는다.
+        확인 중이면 그 식당 확인이 끝날 때까지 잠깐 기다린다. 그래도 확인 중이면 409로 막는다 (이슈 #85:
+        화면은 확인이 끝나야 버튼을 켜고, 서버도 같은 규칙). 확인하지 못한 후보(오류·차단·건너뜀)는 막지 않는다.
         """
         if not self.live:
             return
@@ -1604,6 +1914,13 @@ class OrchestratorService:
                 "checked_at": v["checked_at"],
             },
         )
+        if v["status"] == "CHECKING":
+            raise AppError(
+                409,
+                "LIVE_CHECK_IN_PROGRESS",
+                "요기요에서 가게를 확인하고 있어요. 확인이 끝나면 골라 주세요.",
+                {"candidate_index": cand["index"]},
+            )
         if v["status"] == "UNAVAILABLE":
             raise AppError(
                 409,
@@ -1848,6 +2165,20 @@ class OrchestratorService:
         }
 
     @staticmethod
+    def _with_search(delegation: dict) -> dict:
+        """가게 찾기는 ODIGO의 기본 일이라 항상 맡긴 것으로 본다 (이슈 #111)."""
+        actions = list(delegation.get("allowed_actions") or [])
+        if "SEARCH" not in actions:
+            actions.insert(0, "SEARCH")
+        return {**delegation, "allowed_actions": actions}
+
+    @staticmethod
+    def _allows(run: Run, action: str) -> bool:
+        """이 주문에서 ODIGO에게 그 일을 맡겼는지 (주문을 시작할 때의 설정 기준)."""
+        actions = (run.delegation or {}).get("allowed_actions")
+        return True if actions is None else action in actions
+
+    @staticmethod
     def _item_views(items: list[dict]) -> list[dict]:
         return [
             {
@@ -1935,6 +2266,8 @@ class OrchestratorService:
             "order": self._order_view(run),
             **({"split": split} if split else {}),
             **({"over_budget": over_budget} if over_budget else {}),
+            # 요기요 장바구니 금액으로 다시 계산했으면 이전 견적과 바뀐 항목 (이슈 #86)
+            **({"requote": ctx["requote"]} if ctx.get("requote") else {}),
         }
 
     @staticmethod
@@ -1949,6 +2282,8 @@ class OrchestratorService:
             "result": run.result,
             "blocked": run.blocked,
             "error": run.error,
+            # 맡긴 일 (이슈 #111): 화면이 버튼을 '요기요에서 보기'·'요기요에서 직접 결제하기'로 바꾼다
+            "allowed_actions": (run.delegation or {}).get("allowed_actions"),
         }
         if run.notice:
             view["notice"] = run.notice

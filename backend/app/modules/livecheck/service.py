@@ -6,12 +6,14 @@
 - 작업은 장바구니 담기와 같은 작업 스레드(작업자 1개)에서 돈다. 요기요 창이 겹쳐 뜨지 않는다.
 
 설정 (.env)
-- LIVE_CHECK_MODE             : fake(기본, 요기요 접속 없이 시연) | real | off(확인 안 함)
-- LIVE_CHECK_TOP_N=6          : A-05에서 받는 후보 수
-- LIVE_CHECK_WANT=3           : 통과(OK·CHANGED)가 이만큼이면 나머지는 확인하지 않음
+- LIVE_CHECK_MODE             : fake(기본, 요기요 접속 없이 시연) | real | remote(한국 PC 작업기, #80) | off(확인 안 함)
+- LIVE_CHECK_TOP_N=9          : A-05에서 받는 후보 수 (예비 후보 포함)
+- LIVE_CHECK_WANT=5           : 통과(OK·CHANGED)가 이만큼이면 나머지는 확인하지 않음 (= 화면에 보일 후보 수, 이슈 #109)
 - LIVE_CHECK_CONCURRENCY=3    : 동시에 여는 탭 수
 - LIVE_CHECK_TIMEOUT_SECONDS=8: 식당 하나에서 메뉴를 기다리는 시간
-- LIVE_CHECK_CACHE_MINUTES=15 : real 모드에서 이 시간 안에 확인한 식당은 다시 열지 않음
+- LIVE_CHECK_CACHE_MINUTES=15 : real·remote 모드에서 이 시간 안에 확인한 식당은 다시 열지 않음
+- LIVE_CHECK_REMOTE_WAIT_SECONDS=20    : remote 모드에서 작업기가 이 안에 가져가지 않으면 '확인 못 함'
+- LIVE_CHECK_REMOTE_TIMEOUT_SECONDS=90 : 가져간 뒤 이 안에 결과가 안 오면 '확인 못 함'
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import Executor
@@ -42,6 +45,7 @@ from app.modules.livecheck.checker import (
     run_checks,
 )
 from app.modules.livecheck.fake import fake_page
+from app.modules.livecheck.remote import target_to_json
 from app.modules.livecheck.models import RestaurantLiveStatus
 
 log = logging.getLogger("app.livecheck")
@@ -65,8 +69,8 @@ def _num(name: str, default: float) -> float:
 @dataclass(frozen=True)
 class LiveCheckSettings:
     mode: str = field(default_factory=lambda: _env("LIVE_CHECK_MODE", "fake").lower())
-    top_n: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_TOP_N", 6))))
-    want: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_WANT", 3))))
+    top_n: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_TOP_N", 9))))
+    want: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_WANT", 5))))
     concurrency: int = field(default_factory=lambda: max(1, int(_num("LIVE_CHECK_CONCURRENCY", 3))))
     timeout_seconds: float = field(default_factory=lambda: _num("LIVE_CHECK_TIMEOUT_SECONDS", 8))
     cache_minutes: float = field(default_factory=lambda: _num("LIVE_CHECK_CACHE_MINUTES", 15))
@@ -74,10 +78,16 @@ class LiveCheckSettings:
         default_factory=lambda: _env("YOGIYO_CART_HEADLESS", "0") not in ("0", "false")
     )
     browser_channel: str = field(default_factory=lambda: _env("YOGIYO_CART_BROWSER", ""))
+    remote_wait_seconds: float = field(
+        default_factory=lambda: _num("LIVE_CHECK_REMOTE_WAIT_SECONDS", 20)
+    )
+    remote_timeout_seconds: float = field(
+        default_factory=lambda: _num("LIVE_CHECK_REMOTE_TIMEOUT_SECONDS", 90)
+    )
 
     @property
     def enabled(self) -> bool:
-        return self.mode in ("fake", "real")
+        return self.mode in ("fake", "real", "remote")
 
 
 def page_status(page: dict | None) -> str:
@@ -122,6 +132,15 @@ def _job(request_id: str) -> dict | None:
 def _set_job(request_id: str, **values) -> None:
     with _jobs_lock:
         _jobs.setdefault(request_id, {}).update(values)
+
+
+# remote 모드 (#80): PC 작업기가 가져갈 확인 작업. job_id → 작업 (프로세스 안에만 둔다)
+_remote: dict[str, dict] = {}
+_remote_lock = threading.Lock()
+# 작업기가 마지막으로 작업을 가지러 온 시각 (운영 개요의 연결 상태, 이슈 #94)
+worker_seen: dict[str, datetime | None] = {"at": None}
+REMOTE_NOT_CLAIMED = "요기요 확인 PC(작업기)가 작업을 가져가지 않았어요"
+REMOTE_NO_RESULT = "요기요 확인 PC(작업기)가 제시간에 결과를 보내지 않았어요"
 
 
 Observer = Callable[..., object]
@@ -180,6 +199,9 @@ class LiveCheckService:
         """
         if not self.enabled or not candidates:
             return
+        if self.cfg.mode == "remote":
+            self._enqueue_remote(request_id, list(candidates), started_at, fresh_only)
+            return
         _set_job(
             request_id,
             state="RUNNING",
@@ -236,6 +258,117 @@ class LiveCheckService:
                 seconds=self._elapsed(request_id),
                 error=f"{type(exc).__name__}: {exc}",
             )
+
+    # ------------------------------------------------------------ remote 모드 (#80)
+    def _enqueue_remote(self, request_id, candidates, started_at, fresh_only) -> None:
+        """확인 작업을 쌓아 두고 PC 작업기를 기다린다. 같은 주문의 이전 작업은 버린다."""
+        targets = []
+        for c in candidates:
+            t = target_of(c)
+            row = self._fresh_row(t.restaurant_id, started_at, fresh_only)
+            cached = None
+            if row is not None:
+                status, _, reason = self._judge(t, row.page, row.error)
+                cached = {"status": status, "reason": reason}
+            targets.append({"index": c["index"], **target_to_json(t), "cached": cached})
+        job_id = uuid.uuid4().hex
+        with _remote_lock:
+            for jid in [j for j, job in _remote.items() if job["request_id"] == request_id]:
+                del _remote[jid]
+            _remote[job_id] = {
+                "job_id": job_id,
+                "request_id": request_id,
+                "status": "QUEUED",
+                "created_at": self.now(),
+                "claimed_at": None,
+                "worker": None,
+                "targets": targets,
+                "fresh_only": fresh_only,
+            }
+        _set_job(
+            request_id,
+            state="RUNNING",
+            started_at=started_at,
+            started_mono=time.monotonic(),
+            seconds=None,
+            timing={},
+            skipped=[],
+            error=None,
+            remote_job=job_id,
+        )
+
+    def _expire_remote(self) -> None:
+        """작업기가 안 가져가거나 결과를 안 보내면 '확인 못 함'으로 끝낸다 (후보 선택은 막지 않음)."""
+        now = self.now()
+        expired = []
+        with _remote_lock:
+            for jid, job in list(_remote.items()):
+                if job["status"] == "QUEUED":
+                    late = (now - job["created_at"]).total_seconds() > self.cfg.remote_wait_seconds
+                    msg = REMOTE_NOT_CLAIMED
+                else:
+                    late = (now - job["claimed_at"]).total_seconds() > self.cfg.remote_timeout_seconds
+                    msg = REMOTE_NO_RESULT
+                if late:
+                    del _remote[jid]
+                    expired.append((job, msg))
+        for job, msg in expired:
+            rid = job["request_id"]
+            if (_job(rid) or {}).get("remote_job") == job["job_id"]:
+                log.warning("요기요 확인 작업 %s: %s", job["job_id"], msg)
+                _set_job(rid, state="DONE", error=msg, seconds=self._elapsed(rid))
+
+    def claim(self, worker: str | None = None) -> dict | None:
+        """PC 작업기가 가져갈 확인 작업 하나 (먼저 쌓인 것부터). 없으면 None."""
+        worker_seen["at"] = self.now()
+        self._expire_remote()
+        with _remote_lock:
+            queued = [j for j in _remote.values() if j["status"] == "QUEUED"]
+            if not queued:
+                return None
+            job = min(queued, key=lambda j: j["created_at"])
+            job.update(status="CLAIMED", claimed_at=self.now(), worker=worker)
+            return {
+                "job_id": job["job_id"],
+                "request_id": job["request_id"],
+                "targets": job["targets"],
+                "concurrency": self.cfg.concurrency,
+                "want": self.cfg.want,
+                "timeout_seconds": self.cfg.timeout_seconds,
+            }
+
+    def submit(self, job_id: str, results: list[dict], error: str | None = None) -> dict:
+        """작업기 결과: 식당 화면 원본을 저장하고(식당당 한 행) 이 주문의 확인을 끝낸다."""
+        with _remote_lock:
+            job = _remote.get(job_id)
+            if job is None or job["status"] != "CLAIMED":
+                return {"accepted": False}
+            del _remote[job_id]
+        for r in results:
+            if r.get("status") in ("SKIPPED", None) or r.get("cached"):
+                continue
+            page = r.get("page")
+            self._save(str(r["restaurant_id"]), page, None if page is not None else r.get("reason"))
+        rid = job["request_id"]
+        if (_job(rid) or {}).get("remote_job") != job_id:  # 그 사이 다시 확인을 시작함: 원본만 저장
+            return {"accepted": True, "current": False}
+        timing = {
+            int(r["index"]): {"seconds": r.get("seconds"), "cached": bool(r.get("cached"))}
+            for r in results
+            if r.get("status") != "SKIPPED"
+        }
+        skipped = [int(r["index"]) for r in results if r.get("status") == "SKIPPED"]
+        reason = next((r.get("reason") for r in results if r.get("status") == "SKIPPED"), None)
+        _set_job(
+            rid,
+            state="DONE",
+            timing=timing,
+            skipped=skipped,
+            stop_reason=reason,
+            seconds=self._elapsed(rid),
+            error=error,
+        )
+        return {"accepted": True, "current": True}
 
     @staticmethod
     def _elapsed(request_id: str) -> float | None:
@@ -305,7 +438,7 @@ class LiveCheckService:
     # ------------------------------------------------------------ 저장 (식당당 한 행)
     def _since(self, started_at: datetime, fresh_only: bool) -> datetime:
         """이 시각 이후의 확인만 이번 결과로 친다. real 모드는 15분 캐시 (다시 확인이면 제외)."""
-        if self.cfg.mode == "real" and not fresh_only:
+        if self.cfg.mode in ("real", "remote") and not fresh_only:
             return started_at - timedelta(minutes=self.cfg.cache_minutes)
         return started_at
 
@@ -349,6 +482,8 @@ class LiveCheckService:
         started_at: datetime | None,
         fresh_only: bool = False,
     ) -> list:
+        if self.cfg.mode == "remote":
+            self._expire_remote()
         job = _job(request_id) or {}
         out = []
         with self.sf() as s:

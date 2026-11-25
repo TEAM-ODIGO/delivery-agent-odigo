@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.core.db import get_session
 from app.main import create_app
 from app.modules.cart.service import CartService, CartSettings, _data_url
-from app.modules.cart.yogiyo import CartItem, CartOrder, CartResult, _compare
+from app.modules.cart.yogiyo import CartItem, CartOrder, CartResult, _compare, delivery_fee_from_cart
 from app.modules.orchestrator import router as o_router
 from tests.orchestrator.conftest import OK_MESSAGE
 
@@ -183,6 +183,55 @@ def test_compare_finds_quantity_price_and_fee_differences():
     )
     msgs = _compare(order, diff)
     assert len(msgs) == 3
+
+
+# ---- 배달비 읽기 (이슈 #76): 주문표 글자 대신 장바구니 원본(ngStorage-cart) 값으로 ----
+def _cart(**restaurant):
+    return {"restaurant_id": 1, "restaurant": restaurant, "items": []}
+
+
+TIERS = [
+    {"order_amount": 49500, "delivery_fee": 5000},
+    {"order_amount": 26500, "delivery_fee": 5500},
+    {"order_amount": 12000, "delivery_fee": 6000},
+]
+
+
+def test_delivery_fee_from_cart_uses_order_amount_tiers():
+    cart = _cart(delivery_fee=6000, delivery_fee_by_order_amounts=TIERS)
+    assert delivery_fee_from_cart(cart, 13000) == (6000, 0)
+    assert delivery_fee_from_cart(cart, 27500) == (5500, 0)
+    assert delivery_fee_from_cart(cart, 50000) == (5000, 0)
+    assert delivery_fee_from_cart(cart, 10000) == (None, 0)  # 최소 구간 미만
+
+
+def test_delivery_fee_from_cart_free_delivery_is_zero_not_none():
+    """무료배달 가게: 주문표에 '배달요금' 줄이 없어도 0원으로 읽는다 (조아루 사례)."""
+    cart = _cart(delivery_fee=0, delivery_fee_by_order_amounts=[{"order_amount": 18000, "delivery_fee": 0}])
+    assert delivery_fee_from_cart(cart, 27500) == (0, 0)
+    tiers_only_in_serving_type = _cart(serving_type={"vd": {"delivery_fee_by_order_amounts": TIERS}})
+    assert delivery_fee_from_cart(tiers_only_in_serving_type, 27500) == (5500, 0)
+    no_tiers = _cart(delivery_fee=3000, free_delivery_threshold=20000)
+    assert delivery_fee_from_cart(no_tiers, 15000) == (3000, 0)
+    assert delivery_fee_from_cart(no_tiers, 25000) == (0, 0)
+
+
+def test_delivery_fee_from_cart_adds_active_surcharge():
+    cart = _cart(
+        delivery_fee_by_order_amounts=TIERS,
+        delivery_fee_surcharges=[{"serving_type": "VD", "activated_surcharge": {"amount": 1000}}],
+    )
+    assert delivery_fee_from_cart(cart, 13000) == (7000, 1000)
+    order = CartOrder(restaurant_id="1", items=[], expected_delivery_fee_krw=6000)
+    r = CartResult(status="", restaurant_id="1", delivery_fee_krw=7000)
+    assert _compare(order, r, 1000) == ["배달비가 견적과 다름: 견적 6,000원, 요기요 7,000원 (시간대 할증 1,000원 포함)"]
+
+
+def test_unreadable_delivery_fee_is_not_a_mismatch():
+    assert delivery_fee_from_cart({}, 10000) == (None, 0)
+    order = CartOrder(restaurant_id="1", items=[], expected_delivery_fee_krw=0)
+    r = CartResult(status="", restaurant_id="1", delivery_fee_krw=None)
+    assert _compare(order, r) == []
 
 
 def test_screenshot_is_returned_as_data_url(tmp_path):
@@ -372,3 +421,10 @@ def test_install_failure_message_is_readable(monkeypatch):
     with pytest.raises(RuntimeError, match="크로미움 자동 설치 실패.*network unreachable") as e:
         yogiyo.install_chromium()
     assert "handleError" not in str(e.value)
+
+
+def test_cart_off_mode_reports_off(env, session_factory, clock):
+    """담기가 꺼져 있으면 OFF: 화면이 '요기요 확인 전'이라며 승인 버튼을 막지 않게 한다 (이슈 #64)."""
+    client = _client(env, session_factory, clock, mode="off")
+    v = env.flow("AWAITING_APPROVAL")
+    assert client.get(_url(v), headers=USER).json() == {"status": "OFF"}

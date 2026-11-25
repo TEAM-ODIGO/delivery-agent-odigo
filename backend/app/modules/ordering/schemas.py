@@ -1,6 +1,6 @@
 """B 요청 모델 (명세서 요청 예시 그대로). 응답은 views.py에서 dict로 만든다."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
@@ -69,6 +69,22 @@ class BindBenefitBody(Strict):
         if self.local_currency_payment_method_id == self.payment_method_id:
             raise ValueError("지역화폐 수단과 나머지 결제수단은 달라야 합니다.")
         return self
+
+
+# ---------- B-10 (로컬 확장, 이슈 #86) ----------
+class MenuPrice(Strict):
+    menu_id: Id
+    unit_price_krw: Annotated[int, Field(ge=0)]
+
+
+class RequoteBody(Strict):
+    """요기요 장바구니에서 확인한 실제 가격으로 같은 주문안의 견적을 새로 만든다 (메뉴·수량은 그대로)."""
+
+    base_order_version: Version
+    quote_id: Id
+    source: Literal["YOGIYO_CART"]
+    menu_prices: list[MenuPrice] = Field(default_factory=list, max_length=50)
+    delivery_fee_krw: Annotated[int, Field(ge=0)] | None = None
 
 
 # ---------- B-06 ----------

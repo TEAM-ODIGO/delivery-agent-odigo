@@ -14,7 +14,9 @@ export type RunState =
   | "COMPLETED"
   | "BLOCKED"
   | "FAILED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "RECOMMENDED" // 주문안 만들기를 맡기지 않음: 추천까지만 (이슈 #111)
+  | "HANDED_OFF"; // 결제 요청을 맡기지 않음: 주문안까지, 결제는 사용자가 요기요에서
 
 export type Action = "SEARCH" | "BUILD_ORDER" | "REQUEST_PAYMENT";
 
@@ -132,6 +134,8 @@ export type Prompt =
       split?: { local_currency: SplitLeg; remainder: SplitLeg };
       // 사용자가 확인하고 예산을 넘겨 진행하는 주문일 때만 온다
       over_budget?: { limit_krw: number; charge_krw: number; over_krw: number };
+      // 요기요 장바구니 금액으로 다시 계산했을 때만 온다 (이슈 #86)
+      requote?: Requote;
       checks: string[];
       unverified_conditions: string[];
       expires_at: string | null;
@@ -151,7 +155,17 @@ export interface RunView {
     charge_krw: number | null;
     payments?: SplitLeg[]; // 분할결제일 때 수단별 몫 (지역화폐 먼저)
     order: OrderView | null;
+    // 맡긴 일에 따라 넘긴 경우 (이슈 #111)
+    recommendation?: {
+      restaurant_id: string;
+      restaurant_name: string;
+      items: Item[];
+      estimated_total_krw: number | null;
+      yogiyo_url: string;
+    };
+    yogiyo_url?: string | null;
   } | null;
+  allowed_actions?: Action[] | null; // 이 주문에서 ODIGO에게 맡긴 일 (주문 시작 때 설정)
   blocked: { reason_codes: string[]; details: Record<string, unknown> } | null;
   error: {
     code: string;
@@ -182,7 +196,15 @@ export type Reply =
       local_currency_amount_krw?: number; // 있으면 payment_method_id는 나머지를 낼 카드
     }
   | { type: "APPROVE"; card_tap?: CardTap } // card_tap: NFC 실물 카드 태그(로컬 확장)
-  | { type: "CANCEL" };
+  | { type: "CANCEL" }
+  | { type: "RECOMMEND_AGAIN" } // 후보 화면 '다른 가게 추천' (로컬 확장, 이슈 #68)
+  | { type: "REQUOTE_FROM_CART" }; // 승인 화면: 요기요 장바구니 금액으로 재견적 (로컬 확장, 이슈 #86)
+
+export interface Requote {
+  cart_job_id: string;
+  previous: { charge_krw: number; menu_subtotal_krw: number; delivery_fee_krw: number; instant_discount_krw: number };
+  changes: { kind: "MENU_PRICE" | "DELIVERY_FEE" | string; name: string | null; from_krw: number; to_krw: number }[];
+}
 
 export interface PaymentMethod {
   payment_method_id: string;
@@ -234,7 +256,8 @@ export type YogiyoCartStatus =
   | "RUNNING"
   | "CART_READY"
   | "CART_MISMATCH"
-  | "FAILED";
+  | "FAILED"
+  | "OFF"; // 담기가 꺼져 있음 (YOGIYO_CART_MODE=off)
 
 export interface YogiyoCartItem {
   menu_id: number | string;
@@ -247,7 +270,7 @@ export interface YogiyoCartItem {
 export interface YogiyoCartJob {
   status: YogiyoCartStatus;
   job_id?: string;
-  mode?: "fake" | "real" | string;
+  mode?: "fake" | "real" | "remote" | string; // remote: PC 작업기가 담음
   restaurant_id?: string;
   cart_items?: YogiyoCartItem[];
   menu_subtotal_krw?: number | null;
@@ -283,7 +306,7 @@ export interface LiveResult {
 }
 
 export interface LiveCheckView {
-  mode: "fake" | "real" | "off" | string;
+  mode: "fake" | "real" | "remote" | "off" | string;
   state: "RUNNING" | "DONE" | "NONE" | "OFF";
   total: number;
   done: number;
@@ -329,6 +352,7 @@ export interface CardDashboard {
   name: string;
   status: string;
   benefit_rule_version: string;
+  has_benefit_rule: boolean; // false면 혜택 정보만 보여 주는 카드 (추천·결제에는 쓰이지 않는다)
   product: {
     product_name: string | null;
     card_kind: string | null;
@@ -398,6 +422,48 @@ export interface AdminSummary {
   actions: AdminActionRow[];
   action_count: number;
   stuck_minutes: number;
+  // 이슈 #94: 어제 같은 시각 비교 · 시간대별 · 순위 · 연결 상태
+  metrics: { today: AdminMetrics; yesterday: AdminMetrics };
+  hourly: { today: number[]; yesterday: number[] }; // 0~23시
+  rankings: {
+    restaurants: { name: string; count: number; category: string | null }[];
+    foods: { name: string; count: number }[];
+    payment_methods: { name: string; count: number }[];
+  };
+  services: AdminService[];
+}
+
+export interface AdminMetrics {
+  started: number;
+  completed: number;
+  completion_rate: number | null;
+  avg_charge_krw: number | null;
+  saved_krw: number;
+  avg_order_seconds: number | null;
+}
+
+export interface AdminService {
+  key: "LIVE_CHECK" | "YOGIYO_CART" | "AI";
+  label: string;
+  mode: string | null;
+  status: "OK" | "WARN" | "DOWN" | "IDLE" | "OFF";
+  note: string | null;
+  last_at: string | null;
+  worker_seen_at?: string | null;
+  latency_ms?: number | null;
+}
+
+// 운영 개요의 최근 주문 흐름 (이슈 #94)
+export interface AdminFeedEvent {
+  at: string;
+  request_id: string;
+  kind: "STARTED" | "AWAITING_APPROVAL" | "COMPLETED" | "PAYMENT_UNKNOWN" | "BLOCKED" | "FAILED" | "CANCELLED" | "REQUOTED";
+  restaurant_name: string | null;
+  message: string | null;
+  charge_krw: number | null;
+  saved_krw: number | null;
+  reason_codes: string[];
+  changes: { kind: string; name: string | null; from_krw: number; to_krw: number }[] | null;
 }
 
 // O-18 주문 상세 요약
@@ -465,3 +531,52 @@ export interface OwnerDashboard {
   actions: OwnerAction[];
   demo_data: boolean;
 }
+
+// ---- 내 카드 추가 · 모의 마이데이터 (로컬 확장, 팀 합의 전) ----
+export interface MyCard {
+  payment_method_id: string;
+  name: string;
+  type: "CARD" | "LOCAL_CURRENCY" | string;
+  status: string;
+  product_id: string | null;
+  has_benefit_rule: boolean; // false면 목록에는 보이지만 추천·결제에는 쓰이지 않는다
+  balance_krw: number | null;
+  monthly_performance_krw: number | null;
+  monthly_benefit_remaining_krw: number | null;
+  source: "MANUAL" | "MYDATA" | null; // null: 처음부터 있던 결제수단
+  last4: string | null;
+  removable: boolean; // 직접 추가한 카드만 뺄 수 있다
+}
+
+export interface MyCardList {
+  count: number;
+  results: MyCard[];
+  can_add: boolean; // false: 모의결제 서버(E)가 연결돼 있지 않다
+}
+
+export interface CardCatalog {
+  // 혜택 정보를 아는 카드. has_benefit_rule=false(적립형 등)면 정보만 보여 주고 추천·결제에는 쓰지 않는다
+  products: { product_id: string; name: string; has_benefit_rule: boolean }[];
+}
+
+export interface MyDataConsent {
+  consent_id: string;
+  scopes: string[];
+  expires_at: string;
+}
+
+export interface MyDataCard {
+  card_id: string;
+  issuer: string;
+  name: string;
+  last4: string;
+  has_card_info: boolean; // 혜택 정보를 아는 카드 (화면에 혜택을 보여 줄 수 있다)
+  has_benefit_rule: boolean; // 배달 즉시할인 규칙이 있는 카드 (추천·결제에 쓰인다)
+  monthly_performance_krw: number;
+  already_added: boolean;
+}
+
+export type CardAddBody =
+  | { source: "MANUAL"; product_id: string }
+  | { source: "MANUAL"; name: string; issuer?: string; last4?: string }
+  | { source: "MYDATA"; consent_id: string; mydata_card_id: string };
