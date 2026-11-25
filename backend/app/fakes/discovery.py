@@ -227,7 +227,7 @@ class FakeDiscovery:
             score = round(rest.rating * 20 - rest.delivery_minutes / 5 - len(violations) * 30, 1)
             reasons = [
                 f"{'예산 안' if 'BUDGET_EXCEEDED' not in violations else '예산 초과'}"
-                f"({total:,}원)이고 {rest.delivery_minutes}분 안에 도착합니다."
+                f"({total:,}원), {rest.delivery_minutes}분 안에 도착 예정"
             ]
             if rest.local_currency_merchant:
                 reasons.append("지역화폐 가능(추정)")

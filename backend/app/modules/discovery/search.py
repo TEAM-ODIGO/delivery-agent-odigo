@@ -774,11 +774,11 @@ def default_reasons(evaluation: Evaluation, constraints: dict) -> list[str]:
     budget = constraints.get("budget_krw")
 
     if budget is not None and basket.total_krw <= budget:
-        first = f"예산 안({budget:,}원)이고 {minutes}분 안에 도착합니다."
+        first = f"예산 안({budget:,}원), {minutes}분 안에 도착 예정"
     elif budget is not None:
-        first = f"예산보다 {basket.total_krw - budget:,}원 많지만 가장 가까운 후보입니다. {minutes}분 안에 도착합니다."
+        first = f"예산보다 {basket.total_krw - budget:,}원 많은 가장 가까운 후보, {minutes}분 안에 도착 예정"
     else:
-        first = f"총 {basket.total_krw:,}원이고 {minutes}분 안에 도착합니다."
+        first = f"총 {basket.total_krw:,}원, {minutes}분 안에 도착 예정"
 
     details = [f"별점 {float(restaurant.rating):.1f}(리뷰 {restaurant.review_count:,}개)"]
     if constraints.get("people"):

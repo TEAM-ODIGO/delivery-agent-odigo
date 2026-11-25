@@ -120,6 +120,7 @@ button.card:disabled .small:not(.bad-text) { color: var(--faint); }
 .settings-group .input { font-size: 15px; }
 .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
 .kv > span:first-child { color: var(--sub); }
+.kv > span:last-child { text-align: right; }
 .kv.strong { font-weight: 700; font-size: 15px; }
 .kv.strong > span:first-child { color: var(--ink); }
 .ok-text { color: var(--ok); }
@@ -163,6 +164,7 @@ textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
 .switch { width: 46px; height: 26px; border-radius: 13px; background: #c9cdd3; border: 0; position: relative; flex: none; transition: background .15s; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 10px; background: #fff; transition: left .15s; }
 .switch.on { background: var(--pri); }
+.switch:disabled { opacity: .55; cursor: default; } /* 가게 찾기: 항상 켜짐 (이슈 #111) */
 .switch.on::after { left: 23px; }
 .pm-row { display: flex; gap: 12px; align-items: center; padding: 8px 0; cursor: pointer; }
 .pm-row input { width: 20px; height: 20px; flex: none; accent-color: var(--pri); margin-top: 2px; }
@@ -269,9 +271,10 @@ table.data tr.row-bad td { background: var(--bad-soft); }
 .detail-head .title-row { display: flex; align-items: center; gap: 10px; }
 .detail-title { font-size: 19px; }
 .detail-msg { margin: 6px 0 12px; color: var(--sub); }
-.kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 0; font-size: 13.5px; }
-.kv dt { color: var(--sub); }
-.kv dd { margin: 0; }
+/* 운영 상세·점주 화면의 정의 목록. 고객 화면의 금액 줄(div.kv, Row)과 겹치지 않게 dl에만 (이슈 #115) */
+dl.kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 0; font-size: 13.5px; }
+dl.kv dt { color: var(--sub); }
+dl.kv dd { margin: 0; }
 .tabs { display: flex; gap: 6px; }
 .tabs button { height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid #c9cdd3; background: #fff; font-size: 13.5px; cursor: pointer; }
 .tabs button.on { background: var(--ink); border-color: var(--ink); color: #fff; }

@@ -12,7 +12,7 @@ import Clarify from "../screens/Clarify";
 import Candidates from "../screens/Candidates";
 import PaymentSelect from "../screens/PaymentSelect";
 import Approval from "../screens/Approval";
-import { Blocked, Done, Failed, Paying } from "../screens/Results";
+import { Blocked, Done, Failed, Paying, HandedOff, Recommended } from "../screens/Results";
 
 export interface StepProps {
   view: RunView;
@@ -141,6 +141,10 @@ function renderStep(view: RunView, props: StepProps) {
       return <Paying {...props} />;
     case "COMPLETED":
       return <Done {...props} />;
+    case "RECOMMENDED":
+      return <Recommended {...props} />;
+    case "HANDED_OFF":
+      return <HandedOff {...props} />;
     case "BLOCKED":
       return <Blocked {...props} />;
     case "FAILED":

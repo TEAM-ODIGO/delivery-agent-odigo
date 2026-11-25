@@ -14,7 +14,9 @@ export type RunState =
   | "COMPLETED"
   | "BLOCKED"
   | "FAILED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "RECOMMENDED" // 주문안 만들기를 맡기지 않음: 추천까지만 (이슈 #111)
+  | "HANDED_OFF"; // 결제 요청을 맡기지 않음: 주문안까지, 결제는 사용자가 요기요에서
 
 export type Action = "SEARCH" | "BUILD_ORDER" | "REQUEST_PAYMENT";
 
@@ -153,7 +155,17 @@ export interface RunView {
     charge_krw: number | null;
     payments?: SplitLeg[]; // 분할결제일 때 수단별 몫 (지역화폐 먼저)
     order: OrderView | null;
+    // 맡긴 일에 따라 넘긴 경우 (이슈 #111)
+    recommendation?: {
+      restaurant_id: string;
+      restaurant_name: string;
+      items: Item[];
+      estimated_total_krw: number | null;
+      yogiyo_url: string;
+    };
+    yogiyo_url?: string | null;
   } | null;
+  allowed_actions?: Action[] | null; // 이 주문에서 ODIGO에게 맡긴 일 (주문 시작 때 설정)
   blocked: { reason_codes: string[]; details: Record<string, unknown> } | null;
   error: {
     code: string;

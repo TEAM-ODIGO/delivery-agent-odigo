@@ -133,7 +133,7 @@ def test_full_flow_clarify_search_select(client, create):
     }]
     assert first["estimated_total_krw"] == 20000
     assert first["meets_all_constraints"] is True
-    assert first["reasons"][0] == "예산 안(20,000원)이고 35분 안에 도착합니다."
+    assert first["reasons"][0] == "예산 안(20,000원), 35분 안에 도착 예정"
     assert "지역화폐 가능(추정)" in first["reasons"][1]
 
     # 피자 가게(R4)·매운 메뉴(M12)·주류(M13)는 나오지 않는다
