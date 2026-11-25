@@ -9,6 +9,7 @@ import Owner from "./pages/Owner";
 import Tap from "./pages/Tap";
 import Settings from "./pages/Settings";
 import Splash from "./components/Splash";
+import { preloadImagesWhenIdle } from "./lib/images";
 
 export default function App() {
   const [toast, setToast] = useState<string | null>(null);
@@ -19,6 +20,10 @@ export default function App() {
     timer.current = setTimeout(() => setToast(null), 3200);
   }, []);
   useEffect(() => () => clearTimeout(timer.current), []);
+  // 후보·결제수단 화면의 음식·카드 이미지를 미리 받아 둔다 (src/lib/images.ts)
+  useEffect(() => {
+    preloadImagesWhenIdle();
+  }, []);
 
   return (
     <ToastContext.Provider value={show}>

@@ -65,6 +65,9 @@ button:disabled { cursor: not-allowed; }
 @media (hover: hover) { button.card:not(.selected):hover { border-color: #c9cdd3; } } /* 선택된 카드는 hover 중에도 파란 테두리 유지, 터치 기기에서는 회색 hover가 남지 않게 */
 button.card:not(:disabled):active { border: 2px solid var(--pri); padding: 13px 15px; } /* 누르는 순간부터 파란 테두리 (click은 손을 뗄 때 발생) */
 .card.selected { border: 2px solid var(--pri); padding: 13px 15px; }
+/* 다른 카드를 누르는 동안에는 기존 선택 카드의 파란 테두리를 바로 끈다 (안 그러면 손을 뗄 때까지 두 카드가 같이 파랗게 보임) */
+.pull-zone:has(button.card:not(:disabled):active) .card.selected:not(:active) { border: 1px solid var(--line); padding: 14px 16px; }
+button.card { -webkit-tap-highlight-color: transparent; } /* 모바일에서 탭할 때 덮이는 회색 하이라이트 제거 */
 .card.soft { background: #f7f8fa; border-color: transparent; }
 /* 후보 카드 오른쪽 음식 사진: 평점·메뉴·태그 줄만 오른쪽을 비우고, 사진은 태그 줄(.tags) 기준으로 놓는다. 맨 아래 추천 이유 줄은 끝까지 쓴다 */
 .card.has-deco { min-height: 132px; }
