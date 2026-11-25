@@ -7,13 +7,15 @@
     result = discovery.create_request(db, CreateRequestBody(...))
 """
 
+import re
+
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.modules.discovery.timeutil import now_kst, to_iso
 from app.core.errors import AppError
-from app.modules.discovery import llm
+from app.modules.discovery import choices, llm
 from app.modules.discovery.constants import (
     CLARIFICATION_TEMPLATES,
     CONFIRMED,
@@ -157,6 +159,9 @@ def _clean_words(values: list[str] | None) -> list[str]:
 
 # ---------------------------------------------------------------- A-01 조건 추출
 
+EXPLICIT_SOUP = re.compile(r"국물|국밥|탕|찌개|뜨끈|따끈|해장|따뜻|뜨거운")
+
+
 def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction | None,
            message: str) -> tuple[dict, dict, str]:
     """규칙 결과를 먼저 쓰고, 규칙이 비워 둔 항목만 LLM 결과로 채운다.
@@ -197,8 +202,11 @@ def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction |
     # 맵기 상한이 1 이하('안 매운'·'덜 매운')인데 SPICY가 들어오면 뺀다
     if merged["max_spice_level"] is not None and merged["max_spice_level"] <= 1 and "SPICY" in tastes:
         tastes.remove("SPICY")
-    # 음료 주문의 '따뜻한'·'시원한'은 국물이 아니라 온도 (이슈 #107)
-    if any(is_drink_keyword(k) for k in merged["menu_keywords"]) and "SOUP" in tastes:
+    # 음료 주문의 '따뜻한'·'시원한'은 국물·찬 음식이 아니라 온도 (이슈 #107)
+    if any(is_drink_keyword(k) for k in merged["menu_keywords"]):
+        tastes = [t for t in tastes if t not in ("SOUP", "COLD")]
+    # '시원한 거'를 LLM이 국물로도 읽으면, 국물이라고 직접 말하지 않은 한 차가운 음식만 본다 (이슈 #117)
+    if "COLD" in tastes and "SOUP" in tastes and not EXPLICIT_SOUP.search(message):
         tastes.remove("SOUP")
     merged["taste_preferences"] = tastes
 
@@ -378,6 +386,8 @@ def search_request(db: Session, request_id: str, top_n: int, exclude: list[str] 
     prefs = search_prefs(constraints, request.original_message or "")
     if prefs:
         constraints["drink_prefs"] = prefs
+    # 여러 맛 중 고민하는 요청이면 맛을 방향별로 나눠 따로 찾는다 (이슈 #117)
+    constraints.update(choices.search_prefs(constraints, request.original_message or ""))
     bodies, suggestions = search(
         db, constraints, top_n, now=filter_now(), trace=trace, exclude_restaurant_ids=set(exclude or [])
     )

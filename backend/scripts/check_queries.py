@@ -27,6 +27,8 @@ from app.modules.discovery.brands import find_brands
 from app.modules.discovery.catalog_models import Restaurant
 from app.modules.discovery.extractor import extract_by_rules
 from app.modules.discovery.search import search
+from app.modules.discovery import choices
+from app.modules.discovery.drinks import search_prefs
 from app.modules.discovery.timeutil import KST
 db = Path(tempfile.mkdtemp()) / "v.db"
 engine = make_engine(f"sqlite:///{db}"); init_db(engine)
@@ -45,9 +47,14 @@ with S() as s:
     for m in msgs:
         c, _ = extract_by_rules(m)
         c["brands"] = find_brands(m, names)
+        # 서버(search_request)처럼 탐색할 때만 쓰는 값도 넣는다: 음료 선호(#107), 맛 방향(#117)
+        prefs = search_prefs(c, m)
+        if prefs:
+            c["drink_prefs"] = prefs
+        c.update(choices.search_prefs(c, m))
         if not c.get("people"): c["people"] = 1
         bodies, _ = search(s, c, args.top, now=when)
-        print(f"\n▶ {m}  (브랜드={c['brands']} 종류={c.get('cuisine')} 메뉴={c.get('menu_keywords')})")
+        print(f"\n▶ {m}  (브랜드={c['brands']} 종류={c.get('cuisine')} 메뉴={c.get('menu_keywords')} 맛={c.get('taste_preferences')}{' 방향=' + str(c['taste_groups']) if c.get('taste_groups') else ''})")
         if bodies and bodies[0].get("search_notice"): print("   안내:", bodies[0]["search_notice"])
         for b in bodies:
             items = ", ".join(f"{i['name']}×{i['quantity']}" for i in b["items"])
