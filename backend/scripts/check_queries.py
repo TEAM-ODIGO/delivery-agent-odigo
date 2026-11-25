@@ -13,6 +13,7 @@ ap = argparse.ArgumentParser(description="수집 데이터로 대표 문장 추�
 ap.add_argument("messages", nargs="*")
 ap.add_argument("--data", default=str(Path(__file__).resolve().parents[1] / "data"))
 ap.add_argument("--hour", type=int, default=None, help="이 시각(0~23시) 기준으로 영업 중인 가게만")
+ap.add_argument("--top", type=int, default=5, help="후보 수 (화면에 보이는 수, 이슈 #109)")
 args = ap.parse_args()
 data = Path(args.data)
 os.environ["CATALOG_DATA_DIR"] = str(data)
@@ -45,10 +46,11 @@ with S() as s:
         c, _ = extract_by_rules(m)
         c["brands"] = find_brands(m, names)
         if not c.get("people"): c["people"] = 1
-        bodies, _ = search(s, c, 3, now=when)
+        bodies, _ = search(s, c, args.top, now=when)
         print(f"\n▶ {m}  (브랜드={c['brands']} 종류={c.get('cuisine')} 메뉴={c.get('menu_keywords')})")
         if bodies and bodies[0].get("search_notice"): print("   안내:", bodies[0]["search_notice"])
         for b in bodies:
             items = ", ".join(f"{i['name']}×{i['quantity']}" for i in b["items"])
-            print(f"   - {b['restaurant']['name']} | {items} | {b.get('match',{}).get('level','EXACT')}")
+            ok = "조건 충족" if b.get("meets_all_constraints") else "조건 일부 벗어남"
+            print(f"   - {b['restaurant']['name']} | {items} | {b.get('match',{}).get('level','EXACT')} | {ok}")
         if not bodies: print("   (후보 없음)")

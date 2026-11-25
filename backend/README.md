@@ -139,7 +139,7 @@ uv run --env-file .env python scripts/demo_orchestrator.py --list   # 목록
 후보를 보여 줄 때(CANDIDATES_READY) 상위 후보가 지금 요기요에서 주문 가능한지 백그라운드로 확인한다.
 장바구니에는 담지 않고 식당 페이지만 읽는다. 후보 화면은 확인을 기다리지 않는다.
 
-- A-05에서 후보를 `LIVE_CHECK_TOP_N`(6)곳 받고, 순위대로 확인하다 통과가 `LIVE_CHECK_WANT`(3)곳이면 멈춘다.
+- A-05에서 후보를 `LIVE_CHECK_TOP_N`(9)곳 받고, 순위대로 확인하다 통과가 `LIVE_CHECK_WANT`(5)곳이면 멈춘다. 후보 화면에는 고를 수 있는 가게가 `WANT`곳 보인다.
 - 판정: `OK` · `CHANGED`(가격·배달비·최소 주문 금액·메뉴 번호만 다름, 고를 수 있음) · `UNAVAILABLE`(서비스 미제공·메뉴 없음·품절·페이지 안 열림, 고를 수 없음) · `BLOCKED` · `ERROR` · `CHECKING` · `SKIPPED`
 - `GET /orchestrator/runs/{request_id}/live-check` (O-15): 후보별 결과와 진행률. `visible`은 화면에 보일 후보(고를 수 있는 후보가 `WANT`곳 나올 때까지 순위대로), `selectable`은 고를 수 있는지. 주문 불가 후보는 숨기지 않고 사유와 함께 비활성으로 보인다.
 - `POST /orchestrator/runs/{request_id}/live-check` (O-16): 다시 확인 (후보 선택 단계에서만).

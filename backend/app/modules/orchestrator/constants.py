@@ -43,6 +43,8 @@ FINAL = (RunState.COMPLETED, RunState.BLOCKED, RunState.FAILED, RunState.CANCELL
 
 # 화면 진행 표시 (step.current / total)
 TOTAL_STEPS = 8
+# 요기요 실시간 확인을 끈 경우(off) A에서 받아 보여 줄 후보 수 (켜져 있으면 LIVE_CHECK_TOP_N·WANT, 이슈 #109)
+CANDIDATES_SHOWN = 5
 STEPS: dict[RunState, tuple[int, str]] = {
     RunState.RECEIVED: (1, "요청 접수"),
     RunState.NEED_CLARIFICATION: (2, "조건 확인"),

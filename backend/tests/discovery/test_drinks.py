@@ -165,3 +165,22 @@ def test_drink_specialist_comes_before_bakery(db_sessions):
     bodies = run(db_sessions, "카페라떼 2잔")
     ids = [b["restaurant"]["restaurant_id"] for b in bodies]
     assert ids.index("DC") < ids.index("DB")
+
+
+def test_store_missing_one_of_the_drinks_goes_after_full_match(db_sessions):
+    """'레몬에이드랑 카페라떼': 레몬에이드가 없는 빵집은 둘 다 있는 커피집 뒤로, '없어요' 안내와 함께 (이슈 #109)."""
+    with db_sessions() as s:
+        s.add(drink("B4", "DB", "카페라떼", 4000))
+        s.commit()
+    bodies = run(db_sessions, "레몬에이드 하나랑 카페라떼 하나")
+    ids = [b["restaurant"]["restaurant_id"] for b in bodies]
+    assert ids[0] == "DC" and bodies[0]["meets_all_constraints"]
+    bakery = next(b for b in bodies if b["restaurant"]["restaurant_id"] == "DB")
+    assert not bakery["meets_all_constraints"]
+    assert bakery["violations"][0]["code"] == "MENU_MISSING"
+    assert bakery["violations"][0]["message"] == "'레몬에이드'는 이 가게에 없어요."
+
+
+def test_bundle_is_not_picked_for_one_cup():
+    assert drinks.pref_bonus("[묶음할인] 아메리카노 3개 묶음", []) < drinks.pref_bonus("아메리카노", [])
+    assert drinks.pref_bonus("1리터보틀 레몬 아이스티", []) < 0

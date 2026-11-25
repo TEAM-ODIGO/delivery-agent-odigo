@@ -46,6 +46,7 @@ from app.modules.delegation.schemas import (
 )
 from app.modules.orchestrator import admin
 from app.modules.orchestrator.constants import (
+    CANDIDATES_SHOWN,
     FINAL,
     PAYMENT_STARTED,
     STEPS,
@@ -1048,7 +1049,7 @@ class OrchestratorService:
             [*ctx.get("recommended_restaurant_ids", []),
              *[c["restaurant"]["restaurant_id"] for c in ctx.get("candidates", [])]]
         ))
-        top_n = self.live.cfg.top_n if self.live else 3
+        top_n = self.live.cfg.top_n if self.live else CANDIDATES_SHOWN
         rid = run.request_id
         found = self._call(
             run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n, "exclude_restaurant_ids": shown})
@@ -1265,7 +1266,7 @@ class OrchestratorService:
         )
         self._set_ctx(run, policy_id=policy["policy_id"], policy_version=policy["policy_version"])
 
-        top_n = self.live.cfg.top_n if self.live else 3
+        top_n = self.live.cfg.top_n if self.live else CANDIDATES_SHOWN
         found = self._call(run, "A", "A-05", lambda: self.a.search(rid, {"top_n": top_n}))
         cands = [{**c, "index": i} for i, c in enumerate(found.get("candidates", []))]
         cands = self._mark_min_order(run, cands, a["constraints"])

@@ -666,6 +666,18 @@ def evaluate(restaurant: Restaurant, menus: list[Menu], constraints: dict) -> Ev
             "actual": basket.total_krw,
         })
 
+    # 메뉴를 여러 개 말했는데 일부가 이 가게에 없으면 조건 벗어남으로 본다 (이슈 #109).
+    # '레몬에이드 하나랑 아아 하나'에서 레몬에이드가 없는 가게가 둘 다 있는 가게보다 앞에 나오지 않게
+    missing = [k for k in keywords if not keywords_covered(basket, [k])] if len(keywords) > 1 else []
+    if missing and len(missing) < len(keywords):
+        names = ", ".join(f"'{k}'" for k in missing)
+        evaluation.violations.append({
+            "code": "MENU_MISSING",
+            "message": f"{names}{_eun(missing[-1])} 이 가게에 없어요.",
+            "limit": len(keywords),
+            "actual": len(keywords) + len(missing),
+        })
+
     max_minutes = constraints.get("max_delivery_minutes")
     minutes = delivery_minutes_of(restaurant)
     if max_minutes is not None and minutes is not None and minutes > max_minutes:
@@ -1058,6 +1070,12 @@ def sort_near_miss(evaluations: list[Evaluation], tastes: list[str]) -> list[Eva
         evaluations,
         key=lambda e: (len(e.violations), not is_taste_main(e, tastes), round(miss_distance(e), 2), -e.score),
     )
+
+
+def _eun(word: str) -> str:
+    """'레몬에이드' → '는', '짜장' → '은' (받침 있으면 '은')."""
+    code = ord(word[-1]) - 0xAC00 if word else -1
+    return "은" if 0 <= code < 11172 and code % 28 else "는"
 
 
 def _eul(word: str) -> str:

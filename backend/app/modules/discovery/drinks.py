@@ -207,9 +207,13 @@ def can_order_alone(menu_category: str | None) -> bool:
     return not any(word in (menu_category or "") for word in NOT_ALONE_IN_CATEGORY)
 
 
+# 여러 잔 묶음·대용량 ('아메리카노 3개 묶음', '1리터보틀'): 한 잔을 원할 때 고르지 않게
+BUNDLE = re.compile(r"묶음|\d+\s*(?:개입|잔\s*세트)|보틀|리터|\d(?:\.\d)?\s*L\b")
+
+
 def pref_bonus(name: str, prefs: list[str]) -> float:
-    """온도·디카페인 선호에 맞는 메뉴를 먼저 고르게 하는 점수."""
-    bonus = 0.0
+    """온도·디카페인 선호에 맞는 메뉴를 먼저 고르게 하는 점수. 묶음·대용량은 뒤로."""
+    bonus = -3.0 if BUNDLE.search(name) else 0.0
     iced = any(word in name for word in ICE_IN_NAME) and "아이스크림" not in name
     hot = any(word in name for word in HOT_IN_NAME)
     if "ICE" in prefs:

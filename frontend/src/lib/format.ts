@@ -206,5 +206,6 @@ export const OWNER_EXCLUSION: Record<string, string> = {
   DELIVERY_TIME_EXCEEDED: "배달 시간 초과",
   NO_REQUESTED_MENU: "찾는 메뉴 없음",
   NO_TASTE_MATCH: "원하는 맛과 안 맞음",
+  MENU_MISSING: "찾는 메뉴 일부 없음",
   OUT_OF_RANK: "조건은 맞지만 순위 밖",
 };
