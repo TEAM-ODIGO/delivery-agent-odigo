@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import type { StepProps } from "../pages/RunPage";
 import type { Candidate, LiveResult } from "../api/types";
 import { api } from "../api/client";
-import { LiveBadge, LiveCheckBar, LiveCheckNote, liveCheckText, useLiveCheck, useRecheckLive } from "../components/LiveCheck";
+import { LiveBadge, LiveCheckBar, LiveCheckNote, useLiveCheck, useRecheckLive } from "../components/LiveCheck";
 import { Banner, Button, Modal, RobotOverlay, Screen, Tag } from "../components/ui";
 import { krw } from "../lib/format";
 import { usePullToRefresh } from "../lib/usePullToRefresh";
@@ -160,7 +160,7 @@ export default function Candidates({ view, busy, send, decline, back, again }: S
     >
       {/* 요기요 실시간 확인 중에는 화면이 멈춘 것처럼 보이지 않게 UFO 로봇 로딩을 화면 전체에 띄운다 (끝나면 내린다) */}
       {liveChecking && (
-        <RobotOverlay src="/images/odigo-ufo-loading.webp" label={liveCheckText(lc)}>
+        <RobotOverlay src="/images/odigo-ufo-loading.webp" label="요기요에서 지금 주문 가능한지 확인 중…">
           <button className="link" onClick={back} disabled={busy}>
             이전으로
           </button>
