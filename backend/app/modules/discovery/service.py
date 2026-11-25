@@ -26,6 +26,7 @@ from app.modules.discovery.constants import (
     SOURCE_RULE,
     SOURCE_USER,
 )
+from app.modules.discovery.drinks import find_drink_keywords, is_drink_keyword, search_prefs
 from app.modules.discovery.hours import filter_now
 from app.modules.discovery.extractor import (
     extract_by_rules,
@@ -181,9 +182,12 @@ def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction |
     merged["excluded_ingredients"] = _clean_words(
         rule_constraints["excluded_ingredients"] + grounded_exclusions(message, extraction.excluded_ingredients)
     )
-    merged["menu_keywords"] = _clean_words(
-        rule_constraints["menu_keywords"] + grounded_menu_keywords(message, extraction.menu_keywords)
-    )
+    # 음료(이슈 #107): 규칙이 대표 이름으로 찾으므로 LLM의 '아이스 아메리카노' 같은 구절은 받지 않는다
+    llm_words = [
+        w for w in grounded_menu_keywords(message, extraction.menu_keywords)
+        if is_drink_keyword(w) or not find_drink_keywords(w)
+    ]
+    merged["menu_keywords"] = _clean_words(rule_constraints["menu_keywords"] + llm_words)
     local_only = rule_constraints["payment_requirements"]["local_currency_only"]
     if extraction.local_currency_only and has_hint("local_currency_only", message):
         local_only = True
@@ -193,6 +197,9 @@ def _merge(rule_constraints: dict, rule_notes: dict, extraction: LlmExtraction |
     # 맵기 상한이 1 이하('안 매운'·'덜 매운')인데 SPICY가 들어오면 뺀다
     if merged["max_spice_level"] is not None and merged["max_spice_level"] <= 1 and "SPICY" in tastes:
         tastes.remove("SPICY")
+    # 음료 주문의 '따뜻한'·'시원한'은 국물이 아니라 온도 (이슈 #107)
+    if any(is_drink_keyword(k) for k in merged["menu_keywords"]) and "SOUP" in tastes:
+        tastes.remove("SOUP")
     merged["taste_preferences"] = tastes
 
     # 규칙 메모는 최종 값이 규칙 결과와 같을 때만 남긴다
@@ -366,8 +373,13 @@ def search_request(db: Session, request_id: str, top_n: int, exclude: list[str] 
         })
 
     trace: list[dict] = []
+    # 음료 온도·디카페인 선호는 조건이 아니라 고를 때만 쓰므로 원래 문장에서 읽어 넘긴다 (이슈 #107)
+    constraints = dict(request.constraints)
+    prefs = search_prefs(constraints, request.original_message or "")
+    if prefs:
+        constraints["drink_prefs"] = prefs
     bodies, suggestions = search(
-        db, request.constraints, top_n, now=filter_now(), trace=trace, exclude_restaurant_ids=set(exclude or [])
+        db, constraints, top_n, now=filter_now(), trace=trace, exclude_restaurant_ids=set(exclude or [])
     )
     if exclude and not bodies:
         # 재추천인데 더 없음: 지금 후보(선택 가능 상태)를 그대로 두고 알리기만 한다

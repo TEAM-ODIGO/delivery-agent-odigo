@@ -21,11 +21,15 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.modules.discovery import drinks
 from app.modules.discovery.catalog_models import Menu, Restaurant
 from app.modules.discovery.constants import CUISINES, DISH_PROFILES, MENU_NAME_ALIASES, SPICY_NAME_WORDS, TASTES
 from app.modules.discovery.hours import is_open
 
 ORDERABLE_TYPES = ("main", "set")
+DRINK_TYPES = ("drink",)  # 음료를 말했을 때만 담는다 (이슈 #107)
+DRINK_SPECIALIST_POINTS = 10.0  # 음료 주문에서 음료 전문점 가점 (최대)
+DRINK_SPECIALIST_SHARE = 0.6  # 메뉴의 이만큼이 음료면 가점 만점
 SIDE_TYPES = ("side",)  # 예산이 남으면 곁들임으로 하나 더 담는다 (이슈 #37). 음료는 담지 않는다
 SIDE_MAX_SHARE = 0.4  # 곁들임 가격이 장바구니 메뉴값의 40%를 넘으면 담지 않는다
 SIDE_MIN_PRICE_KRW = 2500  # 이보다 싸면 공기밥·소스 같은 추가 항목으로 본다
@@ -106,6 +110,7 @@ class Evaluation:
     restaurant: Restaurant
     basket: Basket | None = None
     taste_share: float = 0.0  # 담을 수 있는 메뉴 중 원하는 맛 메뉴 비율
+    drink_share: float = 0.0  # 음료 주문일 때: 가게 메뉴 중 음료 비율 (음료 전문점일수록 높다, 이슈 #107)
     violations: list[dict] = field(default_factory=list)
     hard_exclusion: str | None = None  # 값이 있으면 후보로 내보내지 않음
     score: float = 0.0
@@ -172,6 +177,8 @@ def delivery_minutes_of(restaurant: Restaurant) -> int | None:
 # ---------------------------------------------------------------- 메뉴 단위
 
 def estimate_servings(menu: Menu) -> float:
+    if menu.menu_type in DRINK_TYPES:  # 음료는 한 잔이 한 사람 몫 (이슈 #107)
+        return 1.0
     servings = 1.0
     if menu.servings:
         servings = float(menu.servings)
@@ -196,13 +203,16 @@ def contains_any(text: str, words: list[str]) -> str | None:
     return None
 
 
-def name_has_keyword(name: str, keyword: str) -> bool:
-    """메뉴 이름에 사용자가 말한 메뉴가 있는지. 이름에 음식 이름이 안 나오는 메뉴는 MENU_NAME_ALIASES로 본다."""
+def name_has_keyword(name: str, keyword: str, menu_type: str | None = None) -> bool:
+    """메뉴 이름에 사용자가 말한 메뉴가 있는지. 이름에 음식 이름이 안 나오는 메뉴는 MENU_NAME_ALIASES로 본다.
+    음료(커피·차·에이드 …)는 drinks 사전으로 본다 (이슈 #107)."""
+    if drinks.is_drink_keyword(keyword):
+        return drinks.menu_matches(name, menu_type, keyword)
     return any(word in name for word in MENU_NAME_ALIASES.get(keyword, [keyword]) if word)
 
 
-def name_has_any_keyword(name: str, keywords: list[str]) -> bool:
-    return any(name_has_keyword(name, keyword) for keyword in keywords)
+def name_has_any_keyword(name: str, keywords: list[str], menu_type: str | None = None) -> bool:
+    return any(name_has_keyword(name, keyword, menu_type) for keyword in keywords)
 
 
 def matches_taste(menu: Menu, code: str) -> bool:
@@ -259,7 +269,12 @@ def build_item(menu: Menu, constraints: dict, side: bool = False) -> Item | None
     """담을 수 없는 메뉴면 None. side=True면 곁들임(사이드) 메뉴로 본다 (음식 종류 단어는 보지 않음)."""
     if menu.is_sold_out or menu.is_alcohol:
         return None
-    if menu.menu_type not in (SIDE_TYPES if side else ORDERABLE_TYPES):
+    # 음료는 음료를 말했을 때만 담는다. 분류에 '메인 없는 주문 불가'라고 적힌 음료는 따로 못 시킨다 (이슈 #107)
+    drink_order = drinks.is_drink_request(constraints)
+    allowed = SIDE_TYPES if side else (ORDERABLE_TYPES + DRINK_TYPES if drink_order else ORDERABLE_TYPES)
+    if menu.menu_type not in allowed:
+        return None
+    if menu.menu_type in DRINK_TYPES and not drinks.can_order_alone(menu.menu_category):
         return None
     if menu.price_with_required_options_krw < MIN_ITEM_PRICE_KRW:
         return None
@@ -288,7 +303,7 @@ def build_item(menu: Menu, constraints: dict, side: bool = False) -> Item | None
             return None
 
     keywords = constraints.get("menu_keywords") or []
-    keyword_hit = name_has_any_keyword(menu.name, keywords)
+    keyword_hit = name_has_any_keyword(menu.name, keywords, menu.menu_type)
     taste_hit = matches_all_tastes(menu, constraints.get("taste_preferences") or [])
 
     preference = 0.0
@@ -297,6 +312,8 @@ def build_item(menu: Menu, constraints: dict, side: bool = False) -> Item | None
     if menu.is_popular:
         preference += 1.5
     preference += min(math.log10(menu.review_count + 1), 2.0) * 0.5
+    if drink_order:
+        preference += drinks.pref_bonus(menu.name, constraints.get("drink_prefs") or [])
 
     return Item(
         menu=menu,
@@ -434,6 +451,48 @@ def candidate_baskets(
     return baskets
 
 
+def drink_baskets(
+    restaurant: Restaurant, items: list[Item], sides: list[Item], keywords: list[str], cups: int
+) -> list[Basket]:
+    """음료 주문 (이슈 #107): 말한 음료를 잔 수만큼 담는다 ('커피 2잔' → 아메리카노 2).
+
+    음료가 여러 가지면 잔 수를 나눈다. 음료가 아닌 메뉴(케이크)를 같이 말했으면 하나씩 더 담는다.
+    최소주문금액이 모자라면 같은 가게의 다른 음료·디저트·사이드로 채운다.
+    말한 것 중 이 가게에 없는 것은 빼고 담는다 (몇 가지를 담았는지는 점수에 반영). 음료가 하나도 없으면 빈 목록.
+    """
+    def hits_of(word: str) -> list[Item]:
+        found = [item for item in items if name_has_keyword(item.menu.name, word, item.menu.menu_type)]
+        return sorted(found, key=lambda item: -item.preference)[:3]
+
+    drink_words = [k for k in keywords if drinks.is_drink_keyword(k) and hits_of(k)]
+    food_words = [k for k in keywords if not drinks.is_drink_keyword(k) and hits_of(k)]
+    if not drink_words:
+        return []
+    picks = [hits_of(word) for word in drink_words + food_words]
+    quantities = drinks.split_cups(cups, len(drink_words)) + [1] * len(food_words)
+
+    baskets = []
+    for variant in range(3):
+        lines: list[tuple[Item, int]] = []
+        for choices, quantity in zip(picks, quantities, strict=True):
+            item = choices[min(variant, len(choices) - 1)]
+            if any(item is chosen for chosen, _ in lines):
+                continue
+            lines.append((item, quantity))
+        basket = make_basket(restaurant, lines)
+        if basket is None:
+            # 말한 음료를 한 잔 더 담기보다 다른 메뉴로 채운다 ('커피 2잔'에 세 번째 커피를 넣지 않게)
+            fillers = [
+                item for item in items + sides
+                if all(item is not chosen for chosen, _ in lines)
+                and not name_has_any_keyword(item.menu.name, keywords, item.menu.menu_type)
+            ]
+            basket = fill_with_sides(restaurant, lines, fillers)
+        if basket is not None and all(basket is not b and basket.lines != b.lines for b in baskets):
+            baskets.append(basket)
+    return baskets
+
+
 def basket_quality(basket: Basket, people: int) -> float:
     """장바구니를 고를 때의 점수: 메뉴 선호 평균 + 다양성 − 남는 양 − 같은 메뉴 반복 (이슈 #37).
     예전에는 선호 평균만 봐서 가장 인기 있는 메뉴 하나 × 인원수가 늘 이겼다."""
@@ -455,7 +514,7 @@ def basket_quality(basket: Basket, people: int) -> float:
 def keywords_covered(basket: Basket, keywords: list[str]) -> int:
     covered = 0
     for keyword in keywords:
-        if any(name_has_keyword(item.menu.name, keyword) for item, _ in basket.lines):
+        if any(name_has_keyword(item.menu.name, keyword, item.menu.menu_type) for item, _ in basket.lines):
             covered += 1
     return covered
 
@@ -555,6 +614,9 @@ def evaluate(restaurant: Restaurant, menus: list[Menu], constraints: dict) -> Ev
         evaluation.hard_exclusion = "CUISINE_MISMATCH"
         return evaluation
 
+    if drinks.is_drink_request(constraints) and menus:
+        evaluation.drink_share = sum(1 for menu in menus if menu.menu_type in DRINK_TYPES) / len(menus)
+
     items = []
     sides = []
     for menu in menus:
@@ -585,7 +647,10 @@ def evaluate(restaurant: Restaurant, menus: list[Menu], constraints: dict) -> Ev
     people = constraints.get("people") or 1
     budget = constraints.get("budget_krw")
     keywords = constraints.get("menu_keywords") or []
-    basket = choose_basket(candidate_baskets(restaurant, items, people, sides), budget, people, keywords)
+    baskets = drink_baskets(restaurant, items, sides, keywords, people) if drinks.is_drink_request(constraints) else []
+    if not baskets:
+        baskets = candidate_baskets(restaurant, items, people, sides)
+    basket = choose_basket(baskets, budget, people, keywords)
     if basket is not None:
         basket = add_side(restaurant, basket, sides, budget, people)
     if basket is None:
@@ -658,6 +723,9 @@ def compute_score(evaluation: Evaluation, constraints: dict) -> float:
         keyword_score = 10.0
     else:
         keyword_score = 0.0
+    if keywords and drinks.is_drink_request(constraints):
+        # 음료 여러 가지('레몬에이드랑 아메리카노')는 몇 가지를 담았는지로 (이슈 #107)
+        keyword_score = 10.0 * keywords_covered(basket, keywords) / len(keywords)
 
     if is_primary_cuisine(restaurant, constraints.get("cuisine")):
         kind_score = 10.0
@@ -673,6 +741,9 @@ def compute_score(evaluation: Evaluation, constraints: dict) -> float:
         cuisine_score = kind_score
 
     total = rating_score + review_score + speed_score + price_score + menu_score + cuisine_score + keyword_score
+    if drinks.is_drink_request(constraints):
+        # 커피를 시키면 빵집·토스트집보다 커피 전문점을 먼저 (음료 비율 60% 이상이면 만점, 이슈 #107)
+        total += DRINK_SPECIALIST_POINTS * clamp(evaluation.drink_share / DRINK_SPECIALIST_SHARE, 0.0, 1.0)
     total -= VIOLATION_PENALTY * len(evaluation.violations)
     return round(clamp(total, 0.0, 100.0), 1)
 
@@ -1116,7 +1187,8 @@ def _search(
     if exclude:  # 재추천 (이슈 #68): 이미 보여 준 가게는 빼고
         restaurants = [r for r in restaurants if r.restaurant_id not in exclude]
     menus_by_restaurant: dict[str, list[Menu]] = {}
-    for menu in db.scalars(select(Menu).where(Menu.menu_type.in_(ORDERABLE_TYPES + SIDE_TYPES))):
+    types = ORDERABLE_TYPES + SIDE_TYPES + (DRINK_TYPES if drinks.is_drink_request(constraints) else ())
+    for menu in db.scalars(select(Menu).where(Menu.menu_type.in_(types))):
         menus_by_restaurant.setdefault(menu.restaurant_id, []).append(menu)
 
     tiers = build_tiers(constraints)

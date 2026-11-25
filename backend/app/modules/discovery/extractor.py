@@ -18,6 +18,7 @@ from app.modules.discovery.constants import (
     TASTE_ORDER,
     TASTES,
 )
+from app.modules.discovery.drinks import find_cups, find_drink_keywords, is_drink_keyword
 
 KOREAN_DIGITS = {"일": 1, "이": 2, "삼": 3, "사": 4, "오": 5, "육": 6, "칠": 7, "팔": 8, "구": 9}
 PEOPLE_WORDS = {"한": 1, "하나": 1, "두": 2, "둘": 2, "세": 3, "셋": 3, "네": 4, "넷": 4, "다섯": 5, "여섯": 6}
@@ -326,7 +327,9 @@ def normalize_cuisine(value: str | None) -> str | None:
 
 
 def find_menu_keywords(text: str) -> list[str]:
-    """문장에 나온 메뉴 단어. 더 긴 단어의 일부면 빼고(타코야끼의 '타코'), 같은 뜻 표기는 하나만 둔다."""
+    """문장에 나온 메뉴 단어. 더 긴 단어의 일부면 빼고(타코야끼의 '타코'), 같은 뜻 표기는 하나만 둔다.
+    음료(커피·차·에이드 …)는 drinks 사전으로 대표 이름을 찾는다 (이슈 #107)."""
+    drink_words = find_drink_keywords(text)
     found = [keyword for keyword in DISH_KEYWORDS if keyword in text]
     found += [dish for alias, dish in MENU_WORD_ALIASES.items() if alias in text and dish not in found]
     result = []
@@ -335,7 +338,7 @@ def find_menu_keywords(text: str) -> list[str]:
             continue
         if keyword not in result:
             result.append(keyword)
-    return result
+    return result + [word for word in drink_words if word not in result]
 
 
 def extract_by_rules(message: str) -> tuple[dict, dict]:
@@ -365,6 +368,17 @@ def extract_by_rules(message: str) -> tuple[dict, dict]:
     tastes, note = extract_tastes(text)
     if note:
         notes["taste_preferences"] = note
+    # 음료 주문 (이슈 #107): '따뜻한 라떼'의 '따뜻한'은 국물이 아니라 온도, 'N잔'은 수량
+    drinks_found = find_drink_keywords(text)
+    if drinks_found:
+        tastes = [t for t in tastes if t != "SOUP"]
+        cups = find_cups(text)
+        if cups is not None:
+            people = cups
+            notes["people"] = f"'{cups}잔' → people {cups}"
+            budget, note = extract_budget(text, people)
+            if note:
+                notes["budget_krw"] = note
 
     excluded = extract_excluded_ingredients(text)
 
@@ -376,6 +390,9 @@ def extract_by_rules(message: str) -> tuple[dict, dict]:
     cuisine, note = find_cuisine(cleaned)
     if note:
         notes["cuisine"] = note
+    if cuisine is None and drinks_found:
+        cuisine = "카페/디저트"
+        notes["cuisine"] = f"'{drinks_found[0]}' → cuisine 카페/디저트"
 
     constraints = {
         "budget_krw": budget,
@@ -454,6 +471,9 @@ def grounded_menu_keywords(text: str, words: list[str]) -> list[str]:
     for word in words:
         word = str(word).strip()
         if len(word) < 2 or word not in text:
+            continue
+        if is_drink_keyword(word):  # '커피'는 음식 종류(카페/디저트)이면서 메뉴이기도 하다 (이슈 #107)
+            result.append(word)
             continue
         if word in GENERIC_MENU_WORDS or _is_taste_word(word) or _is_cuisine_word(word):
             continue
