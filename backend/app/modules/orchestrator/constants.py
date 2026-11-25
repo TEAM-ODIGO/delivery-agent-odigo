@@ -18,6 +18,9 @@ class RunState(StrEnum):
     BLOCKED = "BLOCKED"  # D(또는 B)가 막음
     FAILED = "FAILED"  # 처리 불가 (후보 없음, 결제 거절, 서비스 장애)
     CANCELLED = "CANCELLED"
+    # 맡긴 일에 따라 ODIGO가 거기까지만 하고 넘긴 정상 종료 (로컬 확장, 이슈 #111)
+    RECOMMENDED = "RECOMMENDED"  # '주문안 만들기'를 맡기지 않음: 추천까지만
+    HANDED_OFF = "HANDED_OFF"  # '결제 요청'을 맡기지 않음: 주문안까지, 결제는 사용자가 요기요에서
 
 
 class ReplyType(StrEnum):
@@ -39,7 +42,11 @@ WAITING: dict[RunState, ReplyType] = {
 }
 # 결제가 시작된 뒤에는 취소할 수 없다 (결제 후에는 O-08 환불)
 PAYMENT_STARTED = (RunState.PAYING, RunState.PAYMENT_UNKNOWN, RunState.COMPLETED)
-FINAL = (RunState.COMPLETED, RunState.BLOCKED, RunState.FAILED, RunState.CANCELLED)
+FINAL = (
+    RunState.COMPLETED, RunState.BLOCKED, RunState.FAILED, RunState.CANCELLED,
+    RunState.RECOMMENDED, RunState.HANDED_OFF,
+)
+YOGIYO_STORE_URL = "https://www.yogiyo.co.kr/mobile/#/{restaurant_id}/"
 
 # 화면 진행 표시 (step.current / total)
 TOTAL_STEPS = 8
@@ -60,6 +67,8 @@ STEPS: dict[RunState, tuple[int, str]] = {
     RunState.BLOCKED: (8, "진행 차단"),
     RunState.FAILED: (8, "처리 실패"),
     RunState.CANCELLED: (8, "취소됨"),
+    RunState.RECOMMENDED: (8, "추천 완료"),
+    RunState.HANDED_OFF: (8, "주문안 전달"),
 }
 
 
